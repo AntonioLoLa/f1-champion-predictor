@@ -1,0 +1,31 @@
+# Streamlit's own chrome, matched to the design tokens in
+# src/f1cp/dashboard/components/palette.py so the framework's widgets and the app's own
+# markup read as one interface. That module is Python and this file is TOML, so the values
+# are necessarily duplicated -- keep the two in sync by hand.
+#
+# The app is dark-only on purpose: it is a single-surface analysis tool, and a light
+# variant would mean maintaining a second validated chart palette to go with it. Fonts
+# load from Google Fonts by URL, Streamlit's own supported mechanism.
+
+[theme]
+base = "dark"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"
+headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700&display=swap"
+codeFont = "JetBrains Mono:https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+baseFontWeight = 400
+
+# Formula 1 red, reserved for emphasis and the primary action.
+primaryColor = "#e10600"
+linkColor = "#f2f3f5"
+
+backgroundColor = "#0f1117"
+secondaryBackgroundColor = "#161923"
+textColor = "#f2f3f5"
+borderColor = "#232733"
+
+baseRadius = "0.625rem"
+buttonRadius = "0.4375rem"
+showWidgetBorder = true
+
+[client]
+toolbarMode = "minimal"
