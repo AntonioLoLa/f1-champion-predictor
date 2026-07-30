@@ -1,0 +1,112 @@
+"""Integration tests for the historical results archive.
+
+These endpoints serve the ingested record rather than anything the model produced, so the
+whole suite runs against a seeded database with no training involved -- which is itself
+the property worth asserting: the archive works before a model exists.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import pytest
+from fastapi.testclient import TestClient
+
+from f1cp.api.main import create_app
+from f1cp.db.session import Database
+from tests.integration.test_dataset_builder import _seed
+from tests.integration.test_predictor import _fast_settings
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from f1cp.config.settings import Settings
+
+pytestmark = pytest.mark.integration
+
+
+@pytest.fixture
+def client(settings: Settings, tmp_path: Path):
+    """An API client over a seeded database, with no model trained."""
+    fast_settings = _fast_settings(settings, tmp_path)
+    database = Database(fast_settings.database)
+    database.create_all()
+    _seed(database)
+    database.dispose()
+
+    with TestClient(create_app(settings=fast_settings)) as test_client:
+        yield test_client
+
+
+def test_seasons_lists_completed_and_in_progress_seasons(client) -> None:
+    body = client.get("/seasons").json()
+
+    seasons = {row["season"]: row for row in body["seasons"]}
+    assert set(seasons) == {2020, 2021}
+    # Newest first, so the season a reader most likely wants is the default.
+    assert [row["season"] for row in body["seasons"]] == [2021, 2020]
+
+    # `_seed` runs 2020 in full but truncates 2021 to its first two rounds of a four-round
+    # calendar, so only 2020 has a champion.
+    assert seasons[2020]["champion_name"]
+    assert seasons[2020]["rounds_completed"] == 4
+    assert seasons[2021]["champion_name"] is None
+    assert seasons[2021]["rounds"] == 4
+    assert seasons[2021]["rounds_completed"] == 2
+
+
+def test_season_races_returns_the_full_calendar_including_unrun_rounds(client) -> None:
+    """A calendar is published before it is run; omitting future rounds would hide it."""
+    races = {race["round"]: race for race in client.get("/seasons/2021/races").json()["races"]}
+
+    # `_seed` truncates 2021 to its first two rounds of a published four-round calendar.
+    assert sorted(races) == [1, 2, 3, 4]
+    assert races[3]["winner_id"] is None
+    assert races[4]["winner_id"] is None
+    # Round 2 is the first round of 2021 the fixture gives an outright winner: its round 1
+    # has a retirement and no classified P1 at all, which the archive reports faithfully
+    # as "no winner" rather than promoting whoever finished best.
+    assert races[2]["winner_id"] == "d1"
+    assert races[2]["winner_name"]
+    assert races[1]["winner_id"] is None
+
+
+def test_race_results_are_classified_winner_first(client) -> None:
+    results = client.get("/seasons/2020/races/1/results").json()
+
+    assert results
+    assert results[0]["position"] == 1
+    positions = [row["position_order"] for row in results]
+    assert positions == sorted(positions)
+
+
+def test_race_results_404_for_a_round_that_has_not_been_run(client) -> None:
+    response = client.get("/seasons/2021/races/4/results")
+
+    assert response.status_code == 404
+
+
+def test_constructor_standings_default_to_the_latest_completed_round(client) -> None:
+    latest = client.get("/seasons/2020/constructor-standings").json()
+    explicit = client.get("/seasons/2020/constructor-standings", params={"round": 4}).json()
+
+    assert latest == explicit
+    assert latest
+    positions = [row["position"] for row in latest]
+    assert positions == sorted(positions)
+
+
+def test_archive_works_without_any_trained_model(client) -> None:
+    """The point of the archive: it is the record, not a model output.
+
+    `/model` has nothing to serve on this fixture, and none of the archive endpoints care.
+    """
+    assert client.get("/model").status_code == 404
+
+    for path in (
+        "/seasons",
+        "/seasons/2020/races",
+        "/seasons/2020/races/1/results",
+        "/seasons/2020/constructor-standings",
+    ):
+        assert client.get(path).status_code == 200, path
