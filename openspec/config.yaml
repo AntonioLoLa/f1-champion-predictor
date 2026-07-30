@@ -1,0 +1,27 @@
+schema: spec-driven
+
+context: |
+  F1 Championship Predictor — estimates each driver's probability of winning the Formula 1
+  World Drivers' Championship after every Grand Prix, trained on the sport's full history.
+
+  Stack: Python 3.12, polars (features), scikit-learn with XGBoost/LightGBM/CatBoost (model
+  zoo), MLflow (tracking), SQLAlchemy + Alembic over PostgreSQL/SQLite, FastAPI (service),
+  Streamlit (dashboard), Docker Compose, pytest.
+
+  Shape of the problem: exactly one driver wins a season, so roughly 45 independent
+  positive labels back 19,000+ driver-round rows. Metrics are reported stratified by season
+  phase, never pooled alone, and validation walks forward through seasons.
+
+  Conventions:
+  - Google-style docstrings on public API; comments explain why, not what.
+  - line-length 100, black-formatted, mypy --strict over the whole package.
+  - Behaviour is driven by conf/*.yaml; prefer configuration over code changes.
+  - Every test carries a marker: unit (no I/O), integration (database/filesystem), e2e,
+    network (deselected by default).
+  - The leakage guard in tests/unit/features/test_pipeline.py is the load-bearing test; any
+    feature change must keep it passing.
+
+rules:
+  specs:
+    - State behaviour the system guarantees, not the module that implements it.
+    - Prefer a scenario an existing or plausible test could assert over prose.
