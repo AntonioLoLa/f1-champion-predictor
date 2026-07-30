@@ -1,0 +1,57 @@
+# ======================================================================================
+# Application-wide configuration.
+#
+# ${VAR:-default} placeholders are expanded from the process environment at load time,
+# so every value here can be overridden without editing the file (see .env.example).
+# ======================================================================================
+
+app:
+  name: f1-champion-predictor
+  environment: ${F1CP_ENV:-local}
+  random_seed: 42
+
+paths:
+  # All relative paths are resolved against the project root.
+  data: ${F1CP_DATA_DIR:-data}
+  raw: ${F1CP_DATA_DIR:-data}/raw
+  interim: ${F1CP_DATA_DIR:-data}/interim
+  processed: ${F1CP_DATA_DIR:-data}/processed
+  cache: ${F1CP_DATA_DIR:-data}/cache
+  artifacts: ${F1CP_DATA_DIR:-data}/artifacts
+  reports: ${F1CP_DATA_DIR:-data}/reports
+
+database:
+  # PostgreSQL in Docker Compose; SQLite keeps local runs and CI dependency-free.
+  url: ${DATABASE_URL:-sqlite:///data/f1cp.db}
+  echo: ${DB_ECHO:-false}
+  pool_size: 5
+  max_overflow: 10
+  pool_pre_ping: true
+
+mlflow:
+  enabled: ${MLFLOW_ENABLED:-true}
+  tracking_uri: ${MLFLOW_TRACKING_URI:-sqlite:///./data/mlflow.db}
+  experiment_name: f1-championship-predictor
+  registered_model_name: f1-champion-predictor
+  # Fail the training run if MLflow is unreachable, instead of silently skipping tracking.
+  strict: false
+
+api:
+  host: ${API_HOST:-0.0.0.0}
+  port: ${API_PORT:-8000}
+  title: F1 Championship Predictor API
+  version: "0.1.0"
+  cors_origins:
+    - http://localhost:8501
+    - http://dashboard:8501
+
+dashboard:
+  host: ${DASHBOARD_HOST:-0.0.0.0}
+  port: ${DASHBOARD_PORT:-8501}
+  api_base_url: ${API_BASE_URL:-http://localhost:8000}
+  request_timeout_seconds: 120.0
+  page_title: F1 Championship Predictor
+
+logging:
+  level: ${LOG_LEVEL:-INFO}
+  format: ${LOG_FORMAT:-console} # console | json

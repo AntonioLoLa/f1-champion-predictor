@@ -1,0 +1,163 @@
+# ======================================================================================
+# Training, validation and model-zoo configuration.
+#
+# Why the selection metric is not accuracy: roughly one driver in twenty is a champion,
+# so a model that always predicts "not champion" scores ~95% accuracy and is useless.
+# Selection is driven by the log loss of the per-(season, round) normalised distribution,
+# which directly measures "did we put probability mass on the eventual champion".
+# ======================================================================================
+
+training:
+  validation:
+    # Never a random split: train on past seasons, validate on the next one.
+    strategy: expanding # expanding | rolling
+    min_train_seasons: 15
+    test_horizon_seasons: 1
+    rolling_window_seasons: 15
+    # Final seasons of each training fold, held out to fit the probability calibrator.
+    calibration_holdout_seasons: 3
+
+  calibration:
+    # Platt scaling, not isotonic. The calibration holdout is three *seasons* -- ~1400
+    # rows, but only three independent championship outcomes, since every round of a
+    # season repeats the same champion. Isotonic reads those rows as 1400 independent
+    # observations and fits a step function that maps its top bin to exactly 1.0, which is
+    # how tree models ended up reporting a 100% title probability with a third of the
+    # season still to run. A two-parameter sigmoid cannot overfit three events that way.
+    enabled: true
+    method: sigmoid # isotonic | sigmoid
+
+  normalisation:
+    # Winning the championship is mutually exclusive: probabilities must sum to 1
+    # within a (season, round) group.
+    enabled: true
+    group_columns: [season, round]
+
+  selection:
+    primary_metric: group_log_loss
+    direction: minimize
+    tie_breakers: [brier_score, expected_calibration_error]
+
+  evaluation:
+    # Season-phase buckets, by fraction of the season completed.
+    phase_bins:
+      early: [0.0, 0.34]
+      mid: [0.34, 0.67]
+      late: [0.67, 1.01]
+    calibration_bins: 10
+
+  imbalance:
+    # Applied per-algorithm via class_weight / scale_pos_weight.
+    strategy: balanced # balanced | none
+
+model_zoo:
+  logistic_regression:
+    enabled: true
+    estimator: logistic_regression
+    scale_features: true
+    params:
+      C: 0.5
+      penalty: l2
+      solver: lbfgs
+      max_iter: 2000
+
+  random_forest:
+    enabled: true
+    estimator: random_forest
+    scale_features: false
+    params:
+      n_estimators: 500
+      max_depth: 8
+      min_samples_leaf: 20
+      max_features: sqrt
+      n_jobs: -1
+
+  xgboost:
+    enabled: true
+    estimator: xgboost
+    scale_features: false
+    params:
+      n_estimators: 400
+      max_depth: 4
+      learning_rate: 0.05
+      subsample: 0.8
+      colsample_bytree: 0.8
+      min_child_weight: 5
+      reg_lambda: 2.0
+      tree_method: hist
+      n_jobs: -1
+
+  lightgbm:
+    enabled: true
+    estimator: lightgbm
+    scale_features: false
+    params:
+      n_estimators: 400
+      num_leaves: 15
+      max_depth: 4
+      learning_rate: 0.05
+      subsample: 0.8
+      subsample_freq: 1
+      colsample_bytree: 0.8
+      min_child_samples: 20
+      reg_lambda: 2.0
+      n_jobs: -1
+      verbose: -1
+
+  catboost:
+    enabled: true
+    estimator: catboost
+    scale_features: false
+    params:
+      iterations: 400
+      depth: 4
+      learning_rate: 0.05
+      l2_leaf_reg: 4.0
+      verbose: 0
+      allow_writing_files: false
+
+  mlp:
+    enabled: true
+    estimator: mlp
+    scale_features: true
+    params:
+      hidden_layer_sizes: [64, 32]
+      activation: relu
+      alpha: 0.001
+      learning_rate_init: 0.001
+      max_iter: 600
+      early_stopping: true
+      n_iter_no_change: 25
+
+  svm:
+    enabled: true
+    estimator: svm
+    scale_features: true
+    params:
+      C: 1.0
+      kernel: rbf
+      gamma: scale
+      # Safety cap: `probability=True` (set in code, not here) already makes this the
+      # slowest candidate to fit; an unbounded max_iter risks a fold that never converges.
+      max_iter: 5000
+
+  knn:
+    enabled: true
+    estimator: knn
+    scale_features: true
+    params:
+      n_neighbors: 15
+      weights: distance
+
+explainability:
+  enabled: true
+  shap:
+    enabled: true
+    # KernelExplainer (used for MLP, SVM and k-NN -- anything with no fast native path) is
+    # expensive; sample instead of running full data.
+    max_samples: 2000
+    background_samples: 100
+  permutation_importance:
+    enabled: true
+    n_repeats: 10
+  top_n_features: 25

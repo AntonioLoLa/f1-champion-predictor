@@ -1,0 +1,66 @@
+# ======================================================================================
+# Data acquisition configuration.
+#
+# Source research (verified 2026-07-27):
+#   jolpica  1950-present, Ergast-compatible, live. 4 req/s burst, 500 req/h, limit<=100.
+#   f1db     1950-present, bulk CSV release, refreshed within a day of each Grand Prix.
+#   fastf1   timing/telemetry 2018+ (results themselves are proxied from Jolpica).
+#   openf1   2023+ only -> enrichment only, cannot reconstruct a championship.
+#   kaggle   mirror of the retired Ergast dump, stale at 2024, requires credentials.
+# ======================================================================================
+
+data:
+  # Seasons kept in the modelling dataset. Ingestion always stores full history;
+  # this bound is applied when the dataset is built.
+  min_season: 1981
+  max_season: null # null -> current calendar year
+
+  # A bulk provider seeds the database in seconds; the API provider then keeps it
+  # current one round at a time, which is what the rate limits are designed for.
+  bootstrap_provider: f1db
+  incremental_provider: jolpica
+
+  # Optional enrichment used by the `modern` feature block. Empty by default so a
+  # first run never blocks on telemetry downloads.
+  enrichment_providers: []
+
+  providers:
+    jolpica:
+      base_url: https://api.jolpi.ca/ergast/f1
+      page_limit: 100 # hard server-side maximum
+      # Deliberately below the documented 4 req/s and 500 req/h to leave headroom.
+      requests_per_second: 3.0
+      requests_per_hour: 450
+      timeout_seconds: 30.0
+      max_retries: 5
+      backoff_factor: 2.0
+      user_agent: f1-champion-predictor/0.1 (+https://github.com/antoniolozano)
+
+    f1db:
+      latest_release_url: https://api.github.com/repos/f1db/f1db/releases/latest
+      asset_name: f1db-csv.zip
+      pinned_tag: null # e.g. "v2026.11.0" for a fully reproducible bootstrap
+      timeout_seconds: 120.0
+
+    fastf1:
+      cache_dir: ${F1CP_DATA_DIR:-data}/cache/fastf1
+      min_season: 2018
+      timeout_seconds: 120.0
+
+    openf1:
+      base_url: https://api.openf1.org/v1
+      min_season: 2023
+      requests_per_second: 2.0 # free tier allows 3 req/s
+      requests_per_hour: 1500
+      timeout_seconds: 30.0
+
+    kaggle:
+      dataset: rohanrao/formula-1-world-championship-1950-2020
+      # Requires KAGGLE_USERNAME / KAGGLE_KEY in the environment.
+
+  http_cache:
+    enabled: true
+    dir: ${F1CP_DATA_DIR:-data}/cache/http
+    ttl_hours: 24
+    # Responses for finished seasons never change, so they are cached indefinitely.
+    immutable_before_season: ${F1CP_IMMUTABLE_BEFORE:-2026}
