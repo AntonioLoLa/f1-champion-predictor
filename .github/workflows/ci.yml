@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Every job installs the project the same way a developer does locally, so `make setup`
+  # is the single source of truth for "how does this project get installed" -- CI never
+  # develops its own, separately-maintained install recipe.
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Cache uv downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: uv-${{ runner.os }}-
+
+      - name: Set up the project
+        run: make setup
+
+      - name: Lint (ruff + black --check + mypy)
+        run: make lint
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Cache uv downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: uv-${{ runner.os }}-
+
+      - name: Set up the project
+        run: make setup
+
+      - name: Test with coverage (excludes tests marked `network`)
+        run: make coverage
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          retention-days: 14
+
+  # Builds the real images and brings up the real stack -- the most direct evidence that
+  # `docker compose up` actually produces a working, healthy deployment, not just a set of
+  # Dockerfiles that happen to parse. Does not exercise the `pipeline` profile: that needs
+  # live internet access to the Jolpica/f1db providers, which a PR-blocking job should never
+  # depend on for reliability (see `nightly-update.yml` for that path instead).
+  docker-smoke:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the pipeline image
+        # `docker compose up` only builds services active under the default profile, so
+        # the `pipeline` target (tagged `profiles: [pipeline]`) is otherwise never even
+        # attempted here -- a broken pipeline Dockerfile would go unnoticed by this job.
+        # `build` targets a named service directly, independent of profile activation.
+        run: docker compose build pipeline
+
+      - name: Build and start the default stack
+        run: docker compose up -d --build
+
+      - name: Wait for the API to become healthy
+        run: timeout 120 bash -c 'until curl -sf http://localhost:8000/health; do sleep 3; done'
+
+      - name: Wait for the dashboard to become healthy
+        run: timeout 90 bash -c 'until curl -sf http://localhost:8501/_stcore/health; do sleep 3; done'
+
+      - name: Confirm every container reports healthy
+        run: |
+          docker compose ps
+          for container_id in $(docker compose ps -q); do
+            status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container_id")
+            name=$(docker inspect --format '{{.Name}}' "$container_id")
+            echo "$name: $status"
+            if [ "$status" != "healthy" ] && [ "$status" != "none" ]; then
+              echo "::error::$name reports health status '$status'"
+              exit 1
+            fi
+          done
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
