@@ -1,0 +1,172 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "f1-champion-predictor"
+version = "0.1.0"
+description = "Machine learning platform that estimates each driver's probability of winning the F1 World Drivers' Championship after every Grand Prix."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Antonio Lozano Larrubia" }]
+keywords = ["formula1", "machine-learning", "mlops", "fastapi", "streamlit"]
+classifiers = [
+    "Programming Language :: Python :: 3.12",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    # ---- configuration & CLI ----
+    "pydantic>=2.9",
+    "pydantic-settings>=2.5",
+    "PyYAML>=6.0",
+    "typer>=0.12",
+    "rich>=13.8",
+    # ---- data access ----
+    "httpx>=0.27",
+    "pandas>=2.2",
+    "polars>=1.9",
+    "pyarrow>=17.0",
+    "numpy>=1.26",
+    # ---- persistence ----
+    "SQLAlchemy>=2.0.30",
+    "alembic>=1.13",
+    "psycopg[binary]>=3.2",
+    # ---- machine learning ----
+    "scikit-learn>=1.5",
+    "xgboost>=2.1",
+    "lightgbm>=4.5",
+    "catboost>=1.2.7",
+    "scipy>=1.14",
+    "shap>=0.46",
+    # ---- experiment tracking ----
+    "mlflow>=2.16",
+    # ---- serving ----
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.31",
+    # ---- dashboard ----
+    "streamlit>=1.39",
+    "plotly>=5.24",
+    "kaleido>=1.0",
+]
+
+[project.optional-dependencies]
+# Telemetry / modern-era enrichment providers. Optional so a bare install stays light.
+telemetry = ["fastf1>=3.8.3"]
+kaggle = ["kagglehub>=0.3"]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=5.0",
+    "respx>=0.21",
+    "freezegun>=1.5",
+    "ruff>=0.6",
+    "black>=24.8",
+    "mypy>=1.11",
+    "types-PyYAML>=6.0",
+    "pandas-stubs>=2.2",
+]
+
+[project.scripts]
+f1cp = "f1cp.cli:app"
+
+[project.urls]
+Repository = "https://github.com/antoniolozano/f1-champion-predictor"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/f1cp"]
+
+# --------------------------------------------------------------------------------------
+# Tooling
+# --------------------------------------------------------------------------------------
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+    "ARG", # flake8-unused-arguments
+    "PTH", # flake8-use-pathlib
+    "RET", # flake8-return
+    "TID", # flake8-tidy-imports
+    "D",   # pydocstyle
+]
+ignore = [
+    "D107", # __init__ docstring lives on the class
+    "D203", # incompatible with D211
+    "D213", # incompatible with D212
+    "E501", # line length is enforced by black
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D", "ARG"]
+"scripts/*" = ["D"]
+# FastAPI's dependency injection idiom is a function call in an argument default; that is
+# exactly the pattern this rule exists to catch everywhere else.
+"src/f1cp/api/routers/*" = ["B008"]
+"src/f1cp/dashboard/pages/*" = ["D"]
+# Alembic-generated; the shape of these files is not ours to choose.
+"src/f1cp/db/migrations/*" = ["D", "W291", "N999"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "parents"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+plugins = ["pydantic.mypy"]
+files = ["src/f1cp"]
+
+[[tool.mypy.overrides]]
+# Third-party packages without bundled type information.
+module = [
+    "catboost.*",
+    "fastf1.*",
+    "kagglehub.*",
+    "lightgbm.*",
+    "mlflow.*",
+    "plotly.*",
+    "shap.*",
+    "sklearn.*",
+    "streamlit.*",
+    "xgboost.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers --strict-config"
+markers = [
+    "unit: fast, hermetic tests with no I/O",
+    "integration: tests that touch a database or the filesystem",
+    "e2e: full pipeline tests (slow)",
+    "network: tests that require live internet access (deselected by default)",
+]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.coverage.run]
+source = ["src/f1cp"]
+omit = ["*/dashboard/*", "*/migrations/*"]
+
+[tool.coverage.report]
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "raise NotImplementedError"]

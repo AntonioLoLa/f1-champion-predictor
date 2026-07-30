@@ -1,0 +1,39 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# ---- Tooling caches ----
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# ---- Project data (bind-mounted at runtime, never baked into the image) ----
+data/
+mlruns/
+mlartifacts/
+*.db
+
+# ---- Tests (not needed at runtime; CI runs them against the host checkout) ----
+tests/
+
+# ---- Secrets & local overrides ----
+.env
+conf/local.yaml
+
+# ---- VCS / editors / misc ----
+.git/
+.github/
+.claude/
+.idea/
+.vscode/
+.DS_Store
+PLAN.md

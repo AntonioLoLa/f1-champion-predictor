@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Project data
+# Everything under data/ is reproducible from `f1cp update-data`.
+/data/*
+!/data/.gitkeep
+
+PLAN.md
+
+# MLflow
+mlruns/
+mlartifacts/
+mlflow.db
+
+# Secrets & local overrides
+.env
+conf/local.yaml
+
+# Editors / OS
+.idea/
+.vscode/
+.claude/settings.local.json
+.DS_Store
