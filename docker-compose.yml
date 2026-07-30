@@ -1,0 +1,117 @@
+name: f1-champion-predictor
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-f1cp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-f1cp}
+      POSTGRES_DB: ${POSTGRES_DB:-f1cp}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-f1cp} -d ${POSTGRES_DB:-f1cp}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # MLflow's own package (already in requirements.lock) runs the tracking server, so this
+  # reuses the shared `base` image rather than pulling a second, separately-versioned one.
+  # Its backend store is a dedicated sqlite file: only this one process ever writes to it
+  # directly, so sqlite's single-writer limitation never applies -- every other service
+  # talks to it over HTTP.
+  mlflow:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: base
+    command: >
+      mlflow server
+      --backend-store-uri sqlite:////app/data/mlflow.db
+      --default-artifact-root file:///app/data/artifacts
+      --serve-artifacts
+      --host 0.0.0.0
+      --port 5000
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: api
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-f1cp}:${POSTGRES_PASSWORD:-f1cp}@postgres:5432/${POSTGRES_DB:-f1cp}
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: dashboard
+    environment:
+      API_BASE_URL: http://api:8000
+      DASHBOARD_HOST: 0.0.0.0
+      DASHBOARD_PORT: 8501
+    ports:
+      - "8501:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  # One-shot pipeline stages: `docker compose run --rm pipeline <script>`. Never started by
+  # a plain `docker compose up` (see the `pipeline` profile), and the only application
+  # service that mounts `./data` -- dataset Parquet files and evaluation reports are
+  # handed off between separate invocations of this same service (update-data, then
+  # build-dataset, then train, then evaluate) purely through that bind mount.
+  pipeline:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: pipeline
+    profiles: ["pipeline"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-f1cp}:${POSTGRES_PASSWORD:-f1cp}@postgres:5432/${POSTGRES_DB:-f1cp}
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
