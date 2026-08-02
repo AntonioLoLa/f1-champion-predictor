@@ -3,6 +3,11 @@
 A driver's average finish at the circuits still left on the calendar is a small, targeted
 piece of foreknowledge: a driver strong at the remaining tracks has an edge that generic
 form features cannot see, because it depends on *which* races are left to run.
+
+The lookup is over *previous seasons only*. A circuit that is still on the calendar has, by
+definition, not been raced yet this year, so there is nothing from the current season to
+read -- and reading it would be a lookahead. That leaves the feature genuinely sparse in a
+driver's first seasons, which is honest: a rookie has no record at Suzuka.
 """
 
 from __future__ import annotations
@@ -12,7 +17,6 @@ from typing import TYPE_CHECKING
 import polars as pl
 
 from f1cp.features.base import FeatureBlock
-from f1cp.features.expr_utils import cum_mean
 
 if TYPE_CHECKING:
     from f1cp.features.context import FeatureContext
@@ -50,32 +54,38 @@ class CircuitBlock(FeatureBlock):
             "circuit_id", pl.col("country").alias("_circuit_country")
         )
 
-        # A driver's per-circuit history, as an expanding average *before* the round it is
-        # attached to -- built once, independent of the calling row's own season/round, so
-        # it can be looked up for any future circuit on the calendar.
-        history = (
-            frame.select("season", "round", "driver_id", "circuit_id", "finish_position")
-            .sort(["driver_id", "circuit_id", "season", "round"])
-            .with_columns(
-                cum_mean(pl.col("finish_position").shift(1))
-                .over(["driver_id", "circuit_id"])
-                .alias("_prior_avg_at_circuit"),
-                pl.col("finish_position")
-                .shift(1)
-                .is_not_null()
-                .cast(pl.Int32)
-                .cum_sum()
-                .over(["driver_id", "circuit_id"])
-                .alias("_prior_visits_at_circuit"),
+        # A driver's record at each circuit, as of the end of each season they visited it.
+        # Keyed by the season the history was accumulated *through*, not by the round the
+        # circuit happened to fall on -- the lookup below asks "what did this driver know
+        # about Monza before this season", and Monza's round number is irrelevant to that
+        # question. Getting this wrong is what made the whole block dead weight: joining on
+        # the round as well meant the key only ever matched when a circuit was raced twice
+        # in one season, so 99.7% of rows came back null and the two features it produces
+        # were noise in every model trained on them.
+        visits = (
+            frame.filter(pl.col("finish_position").is_not_null())
+            .group_by(["driver_id", "circuit_id", "season"])
+            .agg(
+                pl.col("finish_position").sum().alias("_season_positions"),
+                pl.len().alias("_season_visits"),
             )
-            .select(
-                "season",
-                "round",
-                "driver_id",
-                "circuit_id",
-                "_prior_avg_at_circuit",
-                "_prior_visits_at_circuit",
-            )
+            .sort(["driver_id", "circuit_id", "season"])
+        )
+        history = visits.with_columns(
+            pl.col("_season_positions")
+            .cum_sum()
+            .over(["driver_id", "circuit_id"])
+            .alias("_positions_through_season"),
+            pl.col("_season_visits")
+            .cum_sum()
+            .over(["driver_id", "circuit_id"])
+            .alias("_visits_through_season"),
+        ).select(
+            "driver_id",
+            "circuit_id",
+            pl.col("season").alias("_history_season"),
+            "_positions_through_season",
+            "_visits_through_season",
         )
 
         remaining = (
@@ -94,9 +104,27 @@ class CircuitBlock(FeatureBlock):
             .join(remaining, on=["season", "round"], how="inner")
         )
 
-        enriched = drivers_x_remaining.join(
-            history, on=["season", "round", "driver_id", "circuit_id"], how="left"
-        ).filter(pl.col("_prior_visits_at_circuit") >= block_config.min_history_races)
+        # Strictly previous seasons only. Within the current season the driver may not have
+        # reached that circuit yet -- it is on the *remaining* calendar, after all -- and
+        # reading a partial current-season aggregate here would be a lookahead.
+        lookback = block_config.lookback_seasons
+        enriched = (
+            drivers_x_remaining.join(history, on=["driver_id", "circuit_id"], how="inner")
+            .filter(
+                (pl.col("_history_season") < pl.col("season"))
+                & (pl.col("_history_season") >= pl.col("season") - lookback)
+            )
+            .group_by(["season", "round", "driver_id", "circuit_id"])
+            .agg(
+                pl.col("_positions_through_season")
+                .sort_by("_history_season")
+                .last()
+                .alias("_positions"),
+                pl.col("_visits_through_season").sort_by("_history_season").last().alias("_visits"),
+            )
+            .filter(pl.col("_visits") >= block_config.min_history_races)
+            .with_columns((pl.col("_positions") / pl.col("_visits")).alias("_prior_avg_at_circuit"))
+        )
 
         summary = enriched.group_by(["season", "round", "driver_id"]).agg(
             pl.col("_prior_avg_at_circuit").mean().alias("avg_finish_at_remaining_circuits"),

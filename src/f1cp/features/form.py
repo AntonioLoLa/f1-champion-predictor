@@ -24,7 +24,15 @@ class FormBlock(FeatureBlock):
     """Rolling points/finish windows, momentum, trend and consistency."""
 
     name = "form"
-    requires = ("season", "driver_id", "round", "round_points", "finish_position", "is_win")
+    requires = (
+        "season",
+        "driver_id",
+        "round",
+        "round_points",
+        "finish_position",
+        "is_win",
+        "entered",
+    )
 
     def build(self, frame: pl.DataFrame, context: FeatureContext) -> pl.DataFrame:
         """Compute rolling-window form features per driver, within each season.
@@ -59,9 +67,18 @@ class FormBlock(FeatureBlock):
             # this race: positive momentum means the driver is outperforming their own
             # season so far, which a plain rolling average cannot distinguish from a
             # consistently strong driver.
+            #
+            # Divided by rounds *started*, not rounds elapsed, for the reason set out in
+            # :mod:`f1cp.features.rates` -- otherwise a mid-season arrival's points are
+            # spread over races they were not entered for.
             (
                 pl.col("round_points").shift(1).cum_sum().over(group)
-                / pl.col("round").shift(1).over(group).clip(lower_bound=1)
+                / pl.col("entered")
+                .cast(pl.Int32)
+                .shift(1)
+                .cum_sum()
+                .over(group)
+                .clip(lower_bound=1)
             ).alias("season_points_rate"),
         ).with_columns(
             (pl.col(f"last_{block_config.windows[0]}_points") / block_config.windows[0]).alias(
