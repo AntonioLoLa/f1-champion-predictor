@@ -25,7 +25,7 @@ from f1cp.domain.enums import RunStatus
 from f1cp.inference.predictor import PredictionService
 from f1cp.training.tracking import ExperimentTracker
 from tests.integration.test_dataset_builder import _seed
-from tests.unit.features.synthetic import build_synthetic_sources
+from tests.unit.features.synthetic import ROUNDS, build_synthetic_sources
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -178,7 +178,7 @@ def test_predict_season_scores_every_round(settings: Settings, tmp_path: Path) -
     with database.session_scope() as uow:
         results = service.predict_season(uow, 2020)
 
-    assert [result.round for result in results] == [1, 2, 3, 4]
+    assert [result.round for result in results] == list(ROUNDS)
     for result in results:
         assert sum(driver.probability for driver in result.drivers) == pytest.approx(1.0)
 
@@ -224,12 +224,13 @@ def test_title_contention_identifies_the_sole_survivor_at_season_end(
     _seed(database)
     service = PredictionService(fast_settings)
 
+    final_round = ROUNDS[-1]
     with database.session_scope() as uow:
         champions = uow.standings.champion_by_season()
-        result = service.title_contention(uow, season=2020, round_number=4)
+        result = service.title_contention(uow, season=2020, round_number=final_round)
 
     assert result.season == 2020
-    assert result.round == 4
+    assert result.round == final_round
     assert len(result.contenders) == 3
 
     still_alive = [c.driver_id for c in result.contenders if c.still_alive]

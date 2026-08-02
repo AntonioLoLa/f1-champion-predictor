@@ -53,6 +53,8 @@ def _build_synthetic_frame() -> pl.DataFrame:
                         "driver_id": f"driver_{driver_index}",
                         "rounds_total": _ROUNDS_PER_SEASON,
                         "season_progress": round_number / _ROUNDS_PER_SEASON,
+                        "current_points": round_number * (10.0 if is_champion else 5.0),
+                        "is_mathematically_eliminated": False,
                         "champion": 1 if is_champion else 0,
                         "skill": (3.0 if is_champion else 0.0) + float(rng.normal(scale=0.5)),
                         "experience": float(driver_index) + float(rng.normal(scale=0.1)),

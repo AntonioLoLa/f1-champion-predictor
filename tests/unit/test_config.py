@@ -50,6 +50,8 @@ class TestSettings:
         assert settings.data.min_season == 1981
         assert settings.data.bootstrap_provider == "f1db"
         assert settings.data.incremental_provider == "jolpica"
+        # svm and knn are disabled by default: both are significantly behind the leaders on
+        # the selection metric and together were ~70% of a training run's wall clock.
         assert set(settings.enabled_models()) == {
             "logistic_regression",
             "random_forest",
@@ -57,8 +59,6 @@ class TestSettings:
             "lightgbm",
             "catboost",
             "mlp",
-            "svm",
-            "knn",
         }
 
     def test_never_exceeds_the_jolpica_page_limit(self, settings: Settings) -> None:

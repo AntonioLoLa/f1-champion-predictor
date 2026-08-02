@@ -16,7 +16,12 @@ from polars.testing import assert_frame_equal
 
 from f1cp.config.settings import FeaturesConfig, PathsConfig
 from f1cp.features.pipeline import run_pipeline
-from tests.unit.features.synthetic import ROUNDS, SEASONS, build_synthetic_sources
+from tests.unit.features.synthetic import (
+    ABSENCES,
+    DEBUT,
+    build_synthetic_sources,
+    expected_panel_rows,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -45,9 +50,70 @@ def test_pipeline_produces_one_row_per_driver_round(
     sources = build_synthetic_sources()
     frame = run_pipeline(sources, features_config, paths)
 
-    # 2 seasons x 4 rounds x 3 drivers, every driver contests every round.
-    assert frame.height == len(SEASONS) * len(ROUNDS) * 3
+    assert frame.height == expected_panel_rows()
     assert frame.select(["season", "round", "driver_id"]).is_duplicated().sum() == 0
+
+
+def test_a_driver_who_sits_out_a_round_keeps_their_row(
+    features_config: FeaturesConfig, paths: PathsConfig
+) -> None:
+    """Missing a Grand Prix does not remove a driver from the championship.
+
+    The panel row has to survive, flagged ``entered = False``, or the round's probabilities
+    get rescaled over a group that may not contain the eventual champion -- see
+    :func:`f1cp.dataset.builder._apply_filters`.
+    """
+    frame = run_pipeline(build_synthetic_sources(), features_config, paths)
+
+    season, round_number, driver_id = next(iter(ABSENCES))
+    absent = frame.filter(
+        (pl.col("season") == season)
+        & (pl.col("round") == round_number)
+        & (pl.col("driver_id") == driver_id)
+    )
+    assert absent.height == 1
+    assert absent["entered"].item() is False
+    assert absent["finish_position"].item() is None
+    # They still carry the championship state that makes them a candidate for the title.
+    assert absent["current_points"].item() > 0
+
+
+def test_a_driver_has_no_rows_before_their_debut(
+    features_config: FeaturesConfig, paths: PathsConfig
+) -> None:
+    """A driver who has not raced yet is not in the championship and gets no row."""
+    frame = run_pipeline(build_synthetic_sources(), features_config, paths)
+
+    driver_id = "d4"
+    debut_season, debut_round = DEBUT[driver_id]
+    rows = frame.filter(pl.col("driver_id") == driver_id)
+    assert rows.height > 0
+    earliest = rows.sort(["season", "round"]).row(0, named=True)
+    assert (earliest["season"], earliest["round"]) == (debut_season, debut_round)
+
+
+def test_season_rates_divide_by_rounds_started_not_rounds_elapsed(
+    features_config: FeaturesConfig, paths: PathsConfig
+) -> None:
+    """A mid-season arrival's rates must reflect their own races, not the calendar's.
+
+    ``d4`` debuts at round 3 and finishes last every time, so at round 4 they have started
+    exactly one race and scored no podium: ``podium_rate`` must be 0/1, and the denominator
+    must be 1 rather than the 3 rounds the season has already run.
+    """
+    frame = run_pipeline(build_synthetic_sources(), features_config, paths)
+
+    debut_season, debut_round = DEBUT["d4"]
+    after_debut = frame.filter(
+        (pl.col("season") == debut_season)
+        & (pl.col("round") == debut_round + 1)
+        & (pl.col("driver_id") == "d4")
+    )
+    assert after_debut.height == 1
+    # One start, one finish, no DNF: a rate over rounds *started* is exactly 0.0 or 1.0,
+    # never the 1/3 a calendar-round denominator would produce.
+    assert after_debut["dnf_rate"].item() == 0.0
+    assert after_debut["points_finish_rate"].item() in {0.0, 1.0}
 
 
 def test_pipeline_columns_are_numeric_or_boolean(
