@@ -68,3 +68,6 @@ features:
     - race_date
     - circuit_id
     - status
+    # `finished` is `entered AND NOT is_dnf`; both of those are already features, so it
+    # carries no information of its own and only splits their attributed importance.
+    - finished
