@@ -93,6 +93,15 @@ def render(client: DashboardApiClient) -> None:
         meta=[(chosen_name, "accent"), (f"{season} · {len(rounds)} rounds", "")],
     )
 
+    if not rounds[0]["is_out_of_sample"]:
+        st.warning(
+            "The active model was fitted on data that includes this season, so this "
+            "trajectory shows a result it already knows -- it looks far stronger than the "
+            "model's real skill. See the Model leaderboard page for the honest, "
+            "walk-forward number.",
+            icon=":material/history:",
+        )
+
     with st.spinner("Loading standings..."):
         try:
             standings = client.standings(season, round_number=latest_round)

@@ -61,6 +61,14 @@ def render(client: DashboardApiClient) -> None:
         ],
     )
 
+    if not result["is_out_of_sample"]:
+        st.warning(
+            "This model was fitted on data that includes this season, so these odds are a "
+            "replay of a result it already knows -- they look far stronger than the model's "
+            "real skill. See the Model leaderboard page for the honest, walk-forward number.",
+            icon=":material/history:",
+        )
+
     ranked = sorted(result["drivers"], key=lambda driver: driver["rank"])
     leader = ranked[0]
     runner_up = ranked[1] if len(ranked) > 1 else None
