@@ -7,6 +7,15 @@ scored, each candidate is refit once more on (almost) everything known -- the mo
 selection picks is never the one evaluated in cross-validation, only the one trained the
 same way on more data, exactly as it would be retrained in production.
 
+The final refit's calibrator is fit on the last few seasons of the full training window
+(``training.validation.calibration_holdout_seasons``) and held out of the base model's own
+fit, so the deployed calibrator is never scored on data it helped fit -- but those held-out
+seasons are then simply lost to the base model, which is a real cost against ~45 total
+labels. The fix, cross-fitted calibration (K-fold over seasons, calibrator fit on out-of-
+fold predictions, base model refit on everything), was considered and rejected: it is
+materially more machinery in this class for a handful of extra season-labels in the fit,
+against a calibrator that is already clean. Recovering three seasons is not worth it.
+
 The database write is split from the fitting: a ``TrainingRun`` row is inserted and
 committed as ``RUNNING`` before any model is fit (so a crash mid-run is visible rather than
 leaving no trace), the fitting and scoring themselves touch no database, and the final
@@ -36,10 +45,18 @@ from f1cp.domain.enums import RunStatus
 from f1cp.features.context import KEY_COLUMNS
 from f1cp.logging_config import get_logger
 from f1cp.models.calibration import calibrate
-from f1cp.models.normalizer import GroupProbabilityNormalizer
+from f1cp.models.normalizer import ELIMINATED_COLUMN, normalize_round_probabilities
 from f1cp.models.zoo import build_zoo
-from f1cp.training.metrics import compute_metrics, final_round_top1_hit_rate
-from f1cp.training.selection import select_best
+from f1cp.training.metrics import (
+    BASELINE_RANK_COLUMN,
+    attach_baseline_rank,
+    baseline_top1_hit_rate,
+    calibration_metrics,
+    compute_metrics,
+    final_round_rows,
+    final_round_top1_hit_rate,
+)
+from f1cp.training.selection import SelectionResult, select_best
 from f1cp.training.splitters import RollingWindowSplit, SeasonForwardSplit, completed_seasons
 from f1cp.training.tracking import ExperimentTracker
 
@@ -84,6 +101,8 @@ class CandidateResult:
         oof_predictions_path: Where the concatenated, leakage-free out-of-fold
             predictions from every CV fold were written, for evaluation to score without
             re-fitting.
+        fit_seasons: Seasons ``final_pipeline`` was fitted on.
+        calibration_seasons: Seasons held out of that fit to train the calibrator.
         mlflow_run_id: The MLflow run id this candidate was logged under, if tracking is
             enabled.
         mlflow_model_uri: The ``models:/...`` URI of the logged calibrated model, if
@@ -101,6 +120,8 @@ class CandidateResult:
     final_pipeline: Pipeline
     base_pipeline: Pipeline
     oof_predictions_path: str
+    fit_seasons: list[int]
+    calibration_seasons: list[int]
     mlflow_run_id: str | None = None
     mlflow_model_uri: str | None = None
     mlflow_base_model_uri: str | None = None
@@ -117,6 +138,8 @@ class TrainingResult:
         best_model_name: Name of the selected winner.
         best_model_version_id: Primary key of the winner's ``ModelVersion`` row, now
             active.
+        selection: How the winner was chosen, including every candidate the folds could
+            not distinguish from it.
     """
 
     run_uuid: str
@@ -124,6 +147,7 @@ class TrainingResult:
     candidates: list[CandidateResult]
     best_model_name: str
     best_model_version_id: int
+    selection: SelectionResult[CandidateResult]
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,6 +237,8 @@ class Trainer:
                     mlflow_model_uri=candidate.mlflow_model_uri,
                     mlflow_base_model_uri=candidate.mlflow_base_model_uri,
                     oof_predictions_path=candidate.oof_predictions_path,
+                    fit_seasons=candidate.fit_seasons,
+                    calibration_seasons=candidate.calibration_seasons,
                     artifact_path=f"models/{candidate.name}",
                     metrics={k: v for k, v in candidate.metrics.items() if v is not None},
                     params=candidate.params,
@@ -223,8 +249,8 @@ class Trainer:
                 uow.evaluations.add_many(_evaluation_rows(model_version.id, candidate))
                 model_versions_by_name[candidate.name] = model_version
 
-            best_candidate = select_best(candidates, self._settings.training.selection)
-            best_version = model_versions_by_name[best_candidate.name]
+            selection = select_best(candidates, self._settings.training.selection)
+            best_version = model_versions_by_name[selection.winner.name]
             best_version.is_best = True
             uow.models.activate(best_version.id)
 
@@ -234,15 +260,30 @@ class Trainer:
                 raise RuntimeError(msg)
             run.status = str(RunStatus.SUCCEEDED)
             run.finished_at = _utcnow()
+            # Recorded on the run, not just logged: "which candidates could this run not
+            # tell apart" is part of the result, and a reader who only sees the winner
+            # will reasonably assume it won outright.
+            run.params = {**(run.params or {}), "selection": selection.summary()}
 
             best_version_id = best_version.id
 
+        logger.info(
+            "Selected model",
+            extra={
+                "winner": selection.winner.name,
+                "rule": selection.rule,
+                "tied": selection.tied,
+                selection.primary_metric: selection.best_value,
+                "standard_error": selection.standard_error,
+            },
+        )
         return TrainingResult(
             run_uuid=run_uuid,
             training_run_id=training_run_id,
             candidates=candidates,
-            best_model_name=best_candidate.name,
+            best_model_name=selection.winner.name,
             best_model_version_id=best_version_id,
+            selection=selection,
         )
 
     def _mark_failed(self, training_run_id: int, exc: Exception) -> None:
@@ -327,7 +368,7 @@ class Trainer:
         fold_phase: list[dict[str, dict[str, float | None]]] = []
         fold_frames: list[pl.DataFrame] = []
         for fold_index, fold in enumerate(folds):
-            fit_seasons, calibration_seasons = _split_calibration_seasons(
+            fold_fit, fold_calibration = _split_calibration_seasons(
                 fold.train_seasons, training.validation.calibration_holdout_seasons
             )
             scored = self._fit_calibrate_score(
@@ -335,20 +376,23 @@ class Trainer:
                 frame,
                 feature_names,
                 target_column,
-                fit_seasons,
-                calibration_seasons,
+                fold_fit,
+                fold_calibration,
                 fold.test_seasons,
             )
             fold_pooled.append(scored.pooled_metrics)
             fold_phase.append(scored.phase_metrics)
             fold_frames.append(scored.frame.with_columns(pl.lit(fold_index).alias("fold")))
 
-        mean_pooled = _mean_metrics(fold_pooled)
+        oof_frame = pl.concat(fold_frames)
+        mean_pooled = _mean_metrics(fold_pooled) | _pooled_calibration_metrics(
+            oof_frame, target_column, training.evaluation.calibration_bins
+        )
         mean_phase = _mean_phase_metrics(fold_phase)
         oof_predictions_path = (
             self._settings.paths.processed / f"oof_{run_uuid}_{spec.name}.parquet"
         )
-        pl.concat(fold_frames).write_parquet(oof_predictions_path)
+        oof_frame.write_parquet(oof_predictions_path)
 
         fit_seasons, calibration_seasons = _split_calibration_seasons(
             seasons, training.validation.calibration_holdout_seasons
@@ -397,6 +441,8 @@ class Trainer:
             final_pipeline=final_pipeline,
             base_pipeline=base_pipeline,
             oof_predictions_path=str(oof_predictions_path),
+            fit_seasons=fit_seasons,
+            calibration_seasons=calibration_seasons,
             mlflow_run_id=mlflow_run_id,
             mlflow_model_uri=mlflow_model_uri,
             mlflow_base_model_uri=mlflow_base_model_uri,
@@ -423,13 +469,15 @@ class Trainer:
         probabilities = model.predict_proba(x_test)[:, 1]
         scored_frame = test_frame.with_columns(pl.Series(_PROBABILITY_COLUMN, probabilities))
 
-        if training.normalisation.enabled:
-            normalizer = GroupProbabilityNormalizer(training.normalisation.group_columns)
-            scored_frame = normalizer.normalize(scored_frame, _PROBABILITY_COLUMN)
-        else:
-            scored_frame = scored_frame.with_columns(
-                pl.col(_PROBABILITY_COLUMN).alias(_NORMALIZED_COLUMN)
-            )
+        scored_frame = normalize_round_probabilities(
+            scored_frame,
+            probability_column=_PROBABILITY_COLUMN,
+            group_columns=training.normalisation.group_columns,
+            enabled=training.normalisation.enabled,
+        )
+        scored_frame = attach_baseline_rank(
+            scored_frame, group_columns=training.normalisation.group_columns
+        )
 
         pooled = compute_metrics(
             scored_frame,
@@ -441,6 +489,9 @@ class Trainer:
         )
         pooled["final_round_top1_hit_rate"] = final_round_top1_hit_rate(
             scored_frame, probability_column=_NORMALIZED_COLUMN, target_column=target_column
+        )
+        pooled["final_round_baseline_top1_hit_rate"] = baseline_top1_hit_rate(
+            final_round_rows(scored_frame), target_column=target_column
         )
 
         phase_metrics: dict[str, dict[str, float | None]] = {}
@@ -464,6 +515,11 @@ class Trainer:
                 pl.col(target_column),
                 pl.col(_PROBABILITY_COLUMN),
                 pl.col(_NORMALIZED_COLUMN),
+                # Carried so evaluation can re-derive the baseline over any slice it
+                # reports -- per season, per phase -- rather than trusting a number
+                # computed here over a different set of rows.
+                pl.col(BASELINE_RANK_COLUMN),
+                pl.col(ELIMINATED_COLUMN),
             ]
         )
 
@@ -532,13 +588,58 @@ def _split_calibration_seasons(seasons: list[int], holdout: int) -> tuple[list[i
 
 
 def _mean_metrics(fold_metrics: Sequence[dict[str, float | None]]) -> dict[str, float | None]:
-    """Average each metric across folds, ignoring folds where it could not be computed."""
+    """Average each metric across folds, ignoring folds where it could not be computed.
+
+    Correct for the metrics selection uses, which are all means over independent units
+    (``group_log_loss`` averages over rounds, ``top1_hit_rate`` is a fraction of rounds), so
+    a mean of fold means is a season-weighted version of the same quantity -- and, unlike a
+    single pooled number, it leaves a per-fold sample that
+    :func:`~f1cp.training.selection.select_best` can put an error bar on.
+
+    Wrong for the calibration diagnostics, which are non-linear in their bin counts; see
+    :func:`_pooled_calibration_metrics`.
+    """
     keys = {key for fold in fold_metrics for key in fold}
     result: dict[str, float | None] = {}
     for key in keys:
         values = [value for fold in fold_metrics if (value := fold.get(key)) is not None]
         result[key] = float(np.mean(values)) if values else None
     return result
+
+
+def _pooled_calibration_metrics(
+    oof_frame: pl.DataFrame, target_column: str, calibration_bins: int
+) -> dict[str, float | None]:
+    """Recompute Brier and ECE over every out-of-fold row at once.
+
+    Expected calibration error is a weighted average of per-bin gaps, and each gap is
+    estimated from however many rows landed in that bin. Averaged over thirty folds of
+    ~400 rows, most bins hold a handful of rows, every gap is dominated by its own sampling
+    noise, and the mean of those noisy gaps is biased upwards -- the reported figure was
+    0.0243 against 0.0080 for the same predictions pooled, a factor of three of pure
+    binning artefact. Pooling first is the fix, and it costs one pass over a frame the
+    trainer has already built.
+
+    Args:
+        oof_frame: Every fold's out-of-fold predictions, concatenated.
+        target_column: Binary champion label.
+        calibration_bins: Number of bins for the calibration error.
+
+    Returns:
+        The calibration metrics, to be merged over the fold-averaged ones.
+    """
+    return calibration_metrics(
+        oof_frame,
+        probability_column=_PROBABILITY_COLUMN,
+        target_column=target_column,
+        n_bins=calibration_bins,
+    ) | calibration_metrics(
+        oof_frame,
+        probability_column=_NORMALIZED_COLUMN,
+        target_column=target_column,
+        n_bins=calibration_bins,
+        suffix="_normalized",
+    )
 
 
 def _mean_phase_metrics(
