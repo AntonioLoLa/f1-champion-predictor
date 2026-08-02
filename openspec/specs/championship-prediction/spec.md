@@ -21,37 +21,39 @@ Exactly one driver wins a season, so served probabilities SHALL be rescaled to s
 within a season and round. Both the pre-rescaling and post-rescaling values MUST be
 available, so the rescaling is inspectable rather than hidden.
 
-Rescaling currently assumes the eventual champion is among the drivers scored for the
-round. Where they are not, the remaining mass is redistributed over the drivers who are,
-and the served probability can be confident and wrong even though the model's
-pre-rescaling output was not. This is a known defect, not a guarantee — see the audit's
-E4 and the entry it drives in `ROADMAP.md`.
+The scored population for a round SHALL be every driver still contesting that
+championship, whether or not they started that particular round, so the eventual champion
+is never absent from the group being rescaled. A driver who is mathematically eliminated
+SHALL have their probability set to zero before the rescale, so eliminated drivers cannot
+absorb probability mass that belongs to drivers who can still win.
 
 #### Scenario: A round's probabilities sum to one
 
 - **WHEN** a round is scored
 - **THEN** the served probabilities across all drivers in that round sum to one
 
-#### Scenario: A missing driver distorts the rescaling
+#### Scenario: A driver who misses a round is still scored
 
-- **WHEN** the driver who went on to win the title is absent from a round's scored
-  population
-- **THEN** the rescaled probabilities still sum to one over the drivers present, and no
-  longer describe that round's real championship odds
+- **WHEN** a driver contesting the championship does not start a given round
+- **THEN** that driver still has a row in the scored population for that round, so the
+  eventual champion is never dropped from the group being rescaled
+
+#### Scenario: An eliminated driver never receives rescaled probability mass
+
+- **WHEN** a driver is mathematically eliminated from the championship as of a round
+- **THEN** that driver's rescaled probability for that round is zero
 
 ### Requirement: The scored population is documented
 
 The set of drivers a round is scored over SHALL be knowable from the response, because it
-determines the denominator every rescaled probability depends on.
+determines the denominator every rescaled probability depends on. Training and serving
+SHALL agree on that set, so a live prediction scores exactly the population the model was
+evaluated against.
 
-Training and serving do not currently agree on that set: the dataset builder applies
-filters that inference does not, so the live panel carries roughly 9% more rows than the
-model was fitted on. Aligning the two is the audit's highest-priority fix (E3).
-
-#### Scenario: Serving and training populations differ
+#### Scenario: Serving and training populations agree
 
 - **WHEN** the same round is scored live and looked up in the training dataset
-- **THEN** the live population may contain drivers the training population excluded
+- **THEN** the two populations are identical
 
 ### Requirement: A prediction names the model that produced it
 
