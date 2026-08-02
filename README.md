@@ -29,22 +29,30 @@ just pooled, and the model is validated by **walking forward through seasons** �
 on a growing window of past championships, tested on the next one, never on a random split
 that would leak a season's own ending into its own beginning.
 
-## Real results (active model: `logistic_regression`, selected of 6 candidates)
+## Real results (active model: `logistic_regression`, selected of 6 candidates by a one-standard-error rule)
 
 Selected on mean per-group log-loss of the normalized probability distribution across a
 30-fold expanding-origin walk-forward validation (1981–2026); reported on the same
-out-of-fold predictions, never re-fit for reporting.
+out-of-fold predictions, never re-fit for reporting. Every ranking metric is shown next to
+its trivial baseline — "the current championship leader wins the title" — because a metric
+with no baseline next to it is not evidence.
 
-| Season phase | group log-loss ↓ | top-1 hit rate ↑ |
-|---|---|---|
-| Early (< 33% of season) | 2.608 | 67.6% |
-| Mid (33–67%) | 1.228 | 75.1% |
-| Late (> 67%) | 1.013 | 79.7% |
-| **Pooled** | **1.587** | **74.3%** |
-| Final round of each season | — | **86.7%** |
+| Season phase | group log-loss ↓ | top-1 hit rate ↑ | baseline (leader wins) |
+|---|---|---|---|
+| Early (< 33% of season) | 0.901 | 72.0% | 62.9% |
+| Mid (33–67%) | 0.556 | 79.1% | 70.2% |
+| Late (> 67%) | 0.397 | 86.0% | 84.7% |
+| **Pooled** | **0.610** | **79.2%** | **73.0%** |
+| Final round of each season | — | 100.0% | 100.0% |
 
-Pooled classification/calibration diagnostics: accuracy 97.5%, ROC AUC 0.939, PR AUC 0.748,
-log loss 0.252, Brier score 0.0194, expected calibration error 0.022.
+The final-round row is exactly what it looks like: tautological. By a season's last round
+nobody but the points leader has anything left to win, so "the leader wins" also scores
+100% there. Shown anyway, next to its baseline, rather than quietly dropped — a metric that
+ties its own baseline is the strongest possible argument for publishing the baseline.
+
+Pooled classification/calibration diagnostics: accuracy 98.1%, ROC AUC 0.970, PR AUC 0.802,
+log loss 0.073, Brier score 0.0171 (0.0139 on the served, group-normalised probability),
+expected calibration error 0.0072 (0.0056 normalised).
 
 The phase-stratified trend *is* the headline: the model earns its late-season accuracy by
 using the standings, not by cheating — and it is honestly, measurably worse early in a
@@ -55,22 +63,69 @@ season, exactly where the real prediction problem is hard.
 
 | Model | Mean group log-loss |
 |---|---|
-| **Logistic Regression** (active) | **1.587** |
-| Random Forest | 1.672 |
-| MLP | 2.359 |
-| LightGBM | 2.721 |
-| XGBoost | 2.759 |
-| CatBoost | 3.678 |
+| **Logistic Regression** (active) | **0.610** |
+| LightGBM | 0.707 |
+| Random Forest | 0.714 |
+| XGBoost | 0.956 |
+| CatBoost | 1.060 |
+| MLP | 1.389 |
 
-A linear model winning a competition against gradient-boosted trees is a real, reported
-result, not a bug: with ~45 season-level labels and heavy within-season autocorrelation,
-the trees' extra flexibility currently buys overfitting, not signal. `conf/models.yaml`
-re-tunes and re-runs all six on every `f1cp train run`.
+Logistic Regression is not the outright best by a comfortable margin — it, LightGBM and
+Random Forest sit within one standard error of each other across the 30 folds. The winner
+is chosen by a **one-standard-error rule**, not a bare `min()`: among candidates the folds
+cannot statistically tell apart from the best, prefer the simplest (see
+`training/selection.py`). SVM and k-NN are excluded by default (`conf/models.yaml`): both
+were significantly behind and together accounted for ~70% of a training run's wall clock.
 </details>
 
+### Feature ablation: how much of the 73 is doing the work?
+
+Refit the winning model on only its 5 highest permutation-importance features
+(`experience_seasons`, `team_points`, `career_starts`, `finish_position`,
+`rounds_since_win`) instead of all 73 — same folds, same calibration, same everything else.
+
+| Feature set | Mean group log-loss |
+|---|---|
+| All 73 | **0.610** |
+| Top 5 by permutation importance | 1.140 |
+
+Five features are not close to enough — nearly double the loss of the full panel. Worth
+stating plainly because an earlier version of this analysis, run against the pre-fix
+feature set, found the opposite: 5 features within statistical noise of 76. Unifying the
+scored population and removing the exact-duplicate features (see below) changed which
+signal the model actually relies on. Two of these five —
+`experience_seasons`/`career_starts` — are still a correlated pair (r≈0.97); that inflates
+each one's individual permutation-importance ranking while overstating how little of the
+rest of the panel it needs to work alone. The honest conclusion changed with the fix: this
+model needs more than a handful of features.
+
 Bootstrapped data (verified live): **77 seasons (1950–2026), 1,171 races, 27,438 race
-results, 917 drivers**. The modelling dataset (1981+, filtered): **19,195 rows × 76
+results, 917 drivers**. The modelling dataset (1981+, unified population — every driver's
+row for every round after their debut, whether or not they started it): **21,072 rows × 73
 features**.
+
+## Limitations
+
+- **n ≈ 45.** Every number above is a mean over roughly forty-five independent completed
+  championships since 1981, one label each. The top three model families are statistically
+  indistinguishable at this sample size (see the one-standard-error tie set above), and a
+  handful of genuinely undecided championships (2010, 2007, 2025, 2012) account for a
+  disproportionate share of total loss — this is a heavy-tailed problem, not a smoothly
+  improvable one.
+- **In-sample vs. out-of-sample.** The deployed model is refit on nearly every completed
+  season, so scoring a *historical* round replays a result it already knows and looks far
+  better than the numbers above. Every prediction response carries `is_out_of_sample`, and
+  the dashboard warns on it — the numbers reported here are always the honest, held-out,
+  walk-forward ones, never that in-sample replay.
+- **The feature ceiling is low, not absent.** The ablation above shows cutting to 5
+  features nearly doubles the loss, so most of the 73 features earn their place. What it
+  does mean: further feature engineering is unlikely to move `group_log_loss` by more than
+  a few hundredths from here — the remaining error is dominated by genuinely unpredictable
+  seasons, not by missing signal.
+- **The calibrator costs three seasons.** Each fold's last three seasons are held out to
+  fit the probability calibrator rather than the base model, so the deployed model is
+  fit on slightly less than "everything known" (see `Trainer`'s docstring for why
+  cross-fitted calibration was considered and rejected as the fix).
 
 ## Architecture
 
