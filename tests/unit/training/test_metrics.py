@@ -8,6 +8,7 @@ import polars as pl
 import pytest
 
 from f1cp.training.metrics import (
+    attach_baseline_rank,
     brier_score,
     compute_metrics,
     expected_calibration_error,
@@ -40,7 +41,10 @@ def test_group_log_loss_scores_the_true_positive_row() -> None:
     assert loss == pytest.approx(expected)
 
 
-def test_group_log_loss_returns_none_without_a_positive_row() -> None:
+def test_group_log_loss_rejects_a_group_without_a_positive_row() -> None:
+    # E.g. the eventual champion is missing from this group's rows entirely (excluded by
+    # a filter, or absent from the round) -- rescaling to sum to one over the wrong set of
+    # drivers is not a meaningful distribution, so this must raise rather than skip.
     frame = pl.DataFrame(
         {
             "season": [2020],
@@ -49,15 +53,13 @@ def test_group_log_loss_returns_none_without_a_positive_row() -> None:
             "probability": [0.5],
         }
     )
-    assert (
+    with pytest.raises(ValueError, match="do not contain exactly one positive"):
         group_log_loss(
             frame,
             probability_column="probability",
             target_column="champion",
             group_columns=["season", "round"],
         )
-        is None
-    )
 
 
 def test_group_log_loss_rejects_a_group_with_two_positives() -> None:
@@ -69,7 +71,7 @@ def test_group_log_loss_rejects_a_group_with_two_positives() -> None:
             "probability": [0.5, 0.5],
         }
     )
-    with pytest.raises(ValueError, match="more than one positive"):
+    with pytest.raises(ValueError, match="do not contain exactly one positive"):
         group_log_loss(
             frame,
             probability_column="probability",
@@ -174,8 +176,10 @@ def test_compute_metrics_bundles_every_metric() -> None:
             "round": [1, 1],
             "champion": [1, 0],
             "probability": [0.8, 0.2],
+            "current_points": [50, 40],
         }
     )
+    frame = attach_baseline_rank(frame, group_columns=["season", "round"])
     result = compute_metrics(
         frame,
         calibrated_column="probability",
@@ -185,9 +189,12 @@ def test_compute_metrics_bundles_every_metric() -> None:
     )
     assert set(result) == {
         "group_log_loss",
+        "top1_hit_rate",
+        "baseline_top1_hit_rate",
         "brier_score",
         "expected_calibration_error",
-        "top1_hit_rate",
+        "brier_score_normalized",
+        "expected_calibration_error_normalized",
     }
     assert all(value is not None for value in result.values())
 

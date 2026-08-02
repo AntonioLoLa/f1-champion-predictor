@@ -1,14 +1,17 @@
 """The fuller evaluation metric suite, built on top of what training already scores.
 
 ``training.metrics`` computes exactly what model *selection* needs (a grouped log loss,
-Brier score, ECE, top-1 hit rate). This module adds the standard classification-report
-metrics PLAN.md asks for on top of that, reusing the same conventions: rank/probability
-metrics (ROC AUC, PR AUC, log loss, calibration curve) score the **calibrated,
-pre-normalisation** probability, pointwise; classification metrics (accuracy, precision,
-recall, F1, confusion matrix) need a discrete predicted label, which only exists once
-probabilities are turned into "who did the model pick as champion" via
-:func:`~f1cp.training.metrics.top_ranked_mask` -- the same per-group argmax
-:func:`~f1cp.training.metrics.top1_hit_rate` already uses.
+Brier score, ECE, top-1 hit rate). This module adds the rank metrics (ROC AUC, PR AUC, log
+loss, calibration curve) on the **calibrated, pre-normalisation** probability, plus a
+confusion matrix and accuracy built from a discrete predicted label -- "who did the model
+pick as champion" via :func:`~f1cp.training.metrics.top_ranked_mask`, the same per-group
+argmax :func:`~f1cp.training.metrics.top1_hit_rate` already uses.
+
+Deliberately absent: ``precision``, ``recall`` and ``f1``. With exactly one positive row
+per group and exactly one predicted-positive row per group (the top-ranked driver),
+``TP + FN`` and ``TP + FP`` are both the number of groups, which makes precision, recall,
+F1 and ``top1_hit_rate`` the same number by construction -- reporting all four is reporting
+one result four times.
 """
 
 from __future__ import annotations
@@ -20,10 +23,7 @@ from sklearn.metrics import (
     accuracy_score,
     average_precision_score,
     confusion_matrix,
-    f1_score,
     log_loss,
-    precision_score,
-    recall_score,
     roc_auc_score,
 )
 
@@ -66,9 +66,6 @@ def _classification_metrics(
     if frame.is_empty():
         return {
             "accuracy": None,
-            "precision": None,
-            "recall": None,
-            "f1": None,
             "true_positive": None,
             "false_positive": None,
             "false_negative": None,
@@ -84,9 +81,6 @@ def _classification_metrics(
     tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
     return {
         "accuracy": float(accuracy_score(y_true, y_pred)),
-        "precision": float(precision_score(y_true, y_pred, zero_division=0)),
-        "recall": float(recall_score(y_true, y_pred, zero_division=0)),
-        "f1": float(f1_score(y_true, y_pred, zero_division=0)),
         "true_positive": float(tp),
         "false_positive": float(fp),
         "false_negative": float(fn),
@@ -181,9 +175,9 @@ def compute_full_metrics(
         group_columns: Columns identifying a mutually-exclusive group.
 
     Returns:
-        A dict with ``accuracy``, ``precision``, ``recall``, ``f1``, ``true_positive``,
-        ``false_positive``, ``false_negative``, ``true_negative``, ``roc_auc``, ``pr_auc``
-        and ``log_loss``. Any value is ``None`` when it could not be computed on ``frame``.
+        A dict with ``accuracy``, ``true_positive``, ``false_positive``, ``false_negative``,
+        ``true_negative``, ``roc_auc``, ``pr_auc`` and ``log_loss``. Any value is ``None``
+        when it could not be computed on ``frame``.
     """
     return {
         **_classification_metrics(
