@@ -94,9 +94,7 @@ class FastF1Provider(EnrichmentProvider):
             timing data for a recent session may simply not be published yet.
         """
         if season < self.min_season:
-            logger.info(
-                "FastF1 has no timing data for this season", extra={"season": season}
-            )
+            logger.info("FastF1 has no timing data for this season", extra={"season": season})
             return pl.DataFrame()
 
         self._ensure_configured()
@@ -139,9 +137,11 @@ class FastF1Provider(EnrichmentProvider):
             {
                 "abbreviation": clean["Driver"].astype(str).tolist(),
                 "lap_ms": milliseconds.tolist(),
-                "stint": clean["Stint"].fillna(0).astype(int).tolist()
-                if "Stint" in clean
-                else [0] * len(clean),
+                "stint": (
+                    clean["Stint"].fillna(0).astype(int).tolist()
+                    if "Stint" in clean
+                    else [0] * len(clean)
+                ),
             }
         )
 
@@ -163,9 +163,7 @@ class FastF1Provider(EnrichmentProvider):
             pl.lit(round_number, dtype=pl.Int64).alias("round"),
             pl.lit(None, dtype=pl.Float64).alias("quali_best_ms"),
             pl.col("abbreviation")
-            .replace_strict(
-                self._abbreviation_map(session), default=None, return_dtype=pl.String
-            )
+            .replace_strict(self._abbreviation_map(session), default=None, return_dtype=pl.String)
             .alias("driver_id"),
         )
 

@@ -68,9 +68,7 @@ class ProviderRegistry:
             case ProviderName.F1DB:
                 return F1dbProvider(data.providers.f1db, download_dir=self._settings.paths.raw)
             case ProviderName.KAGGLE:
-                return KaggleProvider(
-                    data.providers.kaggle, download_dir=self._settings.paths.raw
-                )
+                return KaggleProvider(data.providers.kaggle, download_dir=self._settings.paths.raw)
             case _:
                 msg = (
                     f"Provider {resolved!r} cannot bulk-load history. "

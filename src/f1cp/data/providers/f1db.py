@@ -87,7 +87,6 @@ class F1dbProvider(BulkHistoryProvider):
         """The release tag actually used, once :meth:`fetch_history` has run."""
         return self._resolved_tag
 
-
     def _resolve_tag(self) -> str:
         """Determine which release to download.
 
@@ -155,7 +154,6 @@ class F1dbProvider(BulkHistoryProvider):
 
         return destination
 
-
     def fetch_history(
         self,
         *,
@@ -201,9 +199,7 @@ class F1dbProvider(BulkHistoryProvider):
                     TableName.RACE_RESULTS: race_results,
                     TableName.SPRINT_RESULTS: sprint_results,
                     TableName.QUALIFYING_RESULTS: self._parse_qualifying(archive),
-                    TableName.DRIVER_STANDINGS: self._parse_driver_standings(
-                        archive, race_results
-                    ),
+                    TableName.DRIVER_STANDINGS: self._parse_driver_standings(archive, race_results),
                     TableName.CONSTRUCTOR_STANDINGS: self._parse_constructor_standings(
                         archive, race_results
                     ),
@@ -217,7 +213,6 @@ class F1dbProvider(BulkHistoryProvider):
             extra={"tag": tag, "rows": bundle.row_counts()},
         )
         return bundle
-
 
     @staticmethod
     def _parse_circuits(archive: zipfile.ZipFile) -> pl.DataFrame:
@@ -277,9 +272,7 @@ class F1dbProvider(BulkHistoryProvider):
         )
 
     @staticmethod
-    def _parse_results(
-        archive: zipfile.ZipFile, filename: str, *, sprint: bool
-    ) -> pl.DataFrame:
+    def _parse_results(archive: zipfile.ZipFile, filename: str, *, sprint: bool) -> pl.DataFrame:
         frame = _read_csv(archive, filename)
         if not frame.height:
             return pl.DataFrame()
@@ -355,15 +348,19 @@ class F1dbProvider(BulkHistoryProvider):
             _float("points").alias("points"),
             _int("positionNumber").alias("position"),
         )
-        return standings.join(
-            _cumulative_wins(race_results, entity="driver_id"),
-            on=["season", "round", "driver_id"],
-            how="left",
-        ).join(
-            _constructor_by_round(race_results),
-            on=["season", "round", "driver_id"],
-            how="left",
-        ).with_columns(pl.col("wins").fill_null(0))
+        return (
+            standings.join(
+                _cumulative_wins(race_results, entity="driver_id"),
+                on=["season", "round", "driver_id"],
+                how="left",
+            )
+            .join(
+                _constructor_by_round(race_results),
+                on=["season", "round", "driver_id"],
+                how="left",
+            )
+            .with_columns(pl.col("wins").fill_null(0))
+        )
 
     @staticmethod
     def _parse_constructor_standings(

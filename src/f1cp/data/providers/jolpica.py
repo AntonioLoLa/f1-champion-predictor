@@ -123,7 +123,6 @@ class JolpicaProvider(SeasonProvider):
         """Request and cache-hit counters, useful for verifying the rate-limit budget."""
         return self._client.stats
 
-
     def _is_immutable(self, season: int) -> bool:
         """Completed seasons never change, so their responses can be cached forever."""
         return season < self._immutable_before_season
@@ -178,7 +177,6 @@ class JolpicaProvider(SeasonProvider):
         for page in self._paginate(path, season):
             races.extend(page.get("RaceTable", {}).get("Races", []))
         return races
-
 
     def available_seasons(self) -> Sequence[int]:
         """Every season the API knows about, ascending.
@@ -247,7 +245,6 @@ class JolpicaProvider(SeasonProvider):
                 TableName.PIT_STOPS: pit_stops,
             }
         )
-
 
     @staticmethod
     def _races_frame(season: int, race_payloads: list[dict[str, Any]]) -> pl.DataFrame:

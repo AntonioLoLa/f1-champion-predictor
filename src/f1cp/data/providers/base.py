@@ -152,10 +152,11 @@ class DataProvider(ABC):
         """
         return capability in self.capabilities
 
-    def close(self) -> None:
+    def close(self) -> None:  # noqa: B027 - not every provider holds a connection
         """Release any held resources. Overridden by providers holding connections."""
 
     def __enter__(self) -> Self:
+        """Return self, so providers can be used as a context manager."""
         return self
 
     def __exit__(
@@ -164,6 +165,7 @@ class DataProvider(ABC):
         exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
+        """Close the provider on exit, regardless of whether an exception occurred."""
         self.close()
 
 

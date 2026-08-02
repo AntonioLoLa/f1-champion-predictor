@@ -15,6 +15,7 @@ Three mechanisms handle this:
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import threading
@@ -206,6 +207,7 @@ class JsonHttpClient:
         self._cache_hits = 0
 
     def __enter__(self) -> Self:
+        """Return self, so the client can be used as a context manager."""
         return self
 
     def __exit__(
@@ -214,6 +216,7 @@ class JsonHttpClient:
         exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
+        """Close the connection pool on exit, regardless of whether an exception occurred."""
         self.close()
 
     def close(self) -> None:
@@ -296,11 +299,10 @@ class JsonHttpClient:
         """Wait before retrying, preferring the server's ``Retry-After`` hint."""
         delay = self._backoff_factor**attempt
         if retry_after := response.headers.get("Retry-After"):
-            try:
+            # Retry-After may be an HTTP date instead of a number of seconds; the
+            # exponential fallback above is fine if it doesn't parse.
+            with contextlib.suppress(ValueError):
                 delay = max(delay, float(retry_after))
-            except ValueError:
-                # Retry-After may be an HTTP date; the exponential fallback is fine.
-                pass
         logger.warning(
             "Retrying request",
             extra={

@@ -127,7 +127,6 @@ class DataIngestor:
         self._database = database
         self._registry = registry
 
-
     def bootstrap(
         self,
         *,
@@ -183,26 +182,25 @@ class DataIngestor:
         report = IngestionReport(provider=str(provider.name), mode=IngestionMode.INCREMENTAL)
         target_seasons = list(seasons) if seasons else [dt.date.today().year]
 
-        with self._audit(report):
-            with provider:
-                for season in target_seasons:
-                    missing = self._missing_rounds(season)
-                    if not missing:
-                        logger.info("Season is already up to date", extra={"season": season})
-                        continue
+        with self._audit(report), provider:
+            for season in target_seasons:
+                missing = self._missing_rounds(season)
+                if not missing:
+                    logger.info("Season is already up to date", extra={"season": season})
+                    continue
 
-                    logger.info(
-                        "Fetching missing rounds",
-                        extra={"season": season, "rounds": missing},
-                    )
-                    bundle = provider.fetch_season(season, rounds=missing)
-                    if bundle.is_empty:
-                        continue
+                logger.info(
+                    "Fetching missing rounds",
+                    extra={"season": season, "rounds": missing},
+                )
+                bundle = provider.fetch_season(season, rounds=missing)
+                if bundle.is_empty:
+                    continue
 
-                    self._apply_identity_if_needed(provider.name, bundle)
-                    with self._database.session_scope() as uow:
-                        self._write(bundle, uow, report)
-                    report.seasons.append(season)
+                self._apply_identity_if_needed(provider.name, bundle)
+                with self._database.session_scope() as uow:
+                    self._write(bundle, uow, report)
+                report.seasons.append(season)
 
         return report
 
@@ -284,7 +282,6 @@ class DataIngestor:
             return pl.DataFrame()
         return pl.concat(frames, how="diagonal_relaxed")
 
-
     def _missing_rounds(self, season: int) -> list[int]:
         """Rounds of a season that have taken place but have no stored results.
 
@@ -300,11 +297,7 @@ class DataIngestor:
         today = dt.date.today()
         with self._database.session_scope() as uow:
             stored = set(uow.races.rounds_with_results(season))
-            calendar = {
-                race.round: race.date
-                for race in uow.races.list()
-                if race.season == season
-            }
+            calendar = {race.round: race.date for race in uow.races.list() if race.season == season}
 
         if not calendar:
             # The season is unknown locally, so the whole calendar has to come from the API.
@@ -479,10 +472,7 @@ def _attach_race_id(frame: pl.DataFrame, race_ids: dict[tuple[int, int], int]) -
         },
         schema={"season": pl.Int64, "round": pl.Int64, "race_id": pl.Int64},
     )
-    return (
-        frame.join(keys, on=["season", "round"], how="inner")
-        .drop("season", "round")
-    )
+    return frame.join(keys, on=["season", "round"], how="inner").drop("season", "round")
 
 
 def _align(frame: pl.DataFrame, model: type[Any]) -> tuple[list[dict[str, Any]], int]:
@@ -516,9 +506,7 @@ def _align(frame: pl.DataFrame, model: type[Any]) -> tuple[list[dict[str, Any]],
         return [], frame.height
 
     required = [
-        name
-        for name in writable
-        if not columns[name].nullable and columns[name].default is None
+        name for name in writable if not columns[name].nullable and columns[name].default is None
     ]
 
     projected = frame.select(writable)
