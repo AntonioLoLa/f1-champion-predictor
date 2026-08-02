@@ -38,4 +38,13 @@ class RoundPredictionsResponse(BaseModel):
     round: int
     model_version_id: int
     model_name: str
+    is_out_of_sample: bool
+    """Whether the serving model was trained without this season.
+
+    False for any completed season, because the deployed artifact is refit on essentially
+    all of them -- so those probabilities are a replay of a result the model already knows,
+    and they look dramatically better than the model's real skill. The honest number for a
+    past season is the walk-forward one reported by ``/model/versions``.
+    """
+
     drivers: list[DriverPredictionResponse]

@@ -91,6 +91,7 @@ def _to_response(result: RoundPredictions) -> RoundPredictionsResponse:
         round=result.round,
         model_version_id=result.model_version_id,
         model_name=result.model_name,
+        is_out_of_sample=result.is_out_of_sample,
         drivers=[
             DriverPredictionResponse(
                 driver_id=driver.driver_id,
