@@ -1,6 +1,6 @@
 # Plan de mejora — triaje de la auditoría
 
-**Entrada:** `AUDIT.md` (2026-07-30).
+**Entrada:** `docs/AUDIT.md` (2026-07-30).
 **Criterio:** simplicidad, robustez, rigor estadístico. Se descarta todo lo que añada complejidad estructural para ganar poco.
 **Resultado:** 11 decisiones. 4 críticas, 4 importantes, 3 opcionales, 5 explícitamente descartadas.
 
@@ -237,7 +237,7 @@
 
 **Origen:** D6 (5 features llegan a 0,6909 vs 0,6039 con 76; p=0,159).
 
-**Qué hacer:** publicar la tabla. El análisis ya está hecho en `AUDIT.md`.
+**Qué hacer:** publicar la tabla. El análisis ya está hecho en `docs/AUDIT.md`.
 
 **Por qué es el punto con mejor relación señal/coste de toda la lista.** Casi ningún proyecto de portfolio mide su propio feature engineering, y prácticamente ninguno publica que la mayor parte no paga. Es la diferencia entre "construí 76 features" y "construí 76 features, medí cuáles importan, y estas cinco explican casi todo". La segunda frase la firma un senior.
 

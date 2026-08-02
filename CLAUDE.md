@@ -33,7 +33,7 @@ delta spec, and is folded into the main specs once shipped. Slash commands
 **Specs describe today, not the target.** Two of them record known defects rather than
 guarantees — group normalisation when the champion is absent from a round, and the
 train/serve population mismatch. Fixing those means strengthening the requirement, and the
-scenario that documents the defect should disappear with it. `AUDIT.md` and `ROADMAP.md`
+scenario that documents the defect should disappear with it. `docs/AUDIT.md` and `docs/ROADMAP.md`
 hold the findings and the triaged plan.
 
 ## Commands
