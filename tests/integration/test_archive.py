@@ -16,6 +16,7 @@ from f1cp.api.main import create_app
 from f1cp.db.session import Database
 from tests.integration.test_dataset_builder import _seed
 from tests.integration.test_predictor import _fast_settings
+from tests.unit.features.synthetic import ROUNDS
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -42,16 +43,18 @@ def test_seasons_lists_completed_and_in_progress_seasons(client) -> None:
     body = client.get("/seasons").json()
 
     seasons = {row["season"]: row for row in body["seasons"]}
-    assert set(seasons) == {2020, 2021}
+    assert set(seasons) == {2019, 2020, 2021}
     # Newest first, so the season a reader most likely wants is the default.
-    assert [row["season"] for row in body["seasons"]] == [2021, 2020]
+    assert [row["season"] for row in body["seasons"]] == [2021, 2020, 2019]
 
-    # `_seed` runs 2020 in full but truncates 2021 to its first two rounds of a four-round
-    # calendar, so only 2020 has a champion.
+    # `_seed` runs 2019 and 2020 in full but truncates 2021 to its first two rounds of its
+    # calendar, so only 2019 and 2020 have a champion.
+    assert seasons[2019]["champion_name"]
+    assert seasons[2019]["rounds_completed"] == len(ROUNDS)
     assert seasons[2020]["champion_name"]
-    assert seasons[2020]["rounds_completed"] == 4
+    assert seasons[2020]["rounds_completed"] == len(ROUNDS)
     assert seasons[2021]["champion_name"] is None
-    assert seasons[2021]["rounds"] == 4
+    assert seasons[2021]["rounds"] == len(ROUNDS)
     assert seasons[2021]["rounds_completed"] == 2
 
 
@@ -59,14 +62,14 @@ def test_season_races_returns_the_full_calendar_including_unrun_rounds(client) -
     """A calendar is published before it is run; omitting future rounds would hide it."""
     races = {race["round"]: race for race in client.get("/seasons/2021/races").json()["races"]}
 
-    # `_seed` truncates 2021 to its first two rounds of a published four-round calendar.
-    assert sorted(races) == [1, 2, 3, 4]
+    # `_seed` truncates 2021 to its first two rounds of a published, longer calendar.
+    assert sorted(races) == list(ROUNDS)
     assert races[3]["winner_id"] is None
     assert races[4]["winner_id"] is None
     # Round 2 is the first round of 2021 the fixture gives an outright winner: its round 1
     # has a retirement and no classified P1 at all, which the archive reports faithfully
     # as "no winner" rather than promoting whoever finished best.
-    assert races[2]["winner_id"] == "d1"
+    assert races[2]["winner_id"] == "d2"
     assert races[2]["winner_name"]
     assert races[1]["winner_id"] is None
 
@@ -88,7 +91,9 @@ def test_race_results_404_for_a_round_that_has_not_been_run(client) -> None:
 
 def test_constructor_standings_default_to_the_latest_completed_round(client) -> None:
     latest = client.get("/seasons/2020/constructor-standings").json()
-    explicit = client.get("/seasons/2020/constructor-standings", params={"round": 4}).json()
+    explicit = client.get(
+        "/seasons/2020/constructor-standings", params={"round": ROUNDS[-1]}
+    ).json()
 
     assert latest == explicit
     assert latest

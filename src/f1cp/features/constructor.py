@@ -83,10 +83,11 @@ class ConstructorBlock(FeatureBlock):
             .drop("_team_points_awarded")
         )
 
+        # No `team_reliability` twin of `team_dnf_rate`: it was exactly `1 - team_dnf_rate`,
+        # and a pair of perfectly anti-correlated columns halves the importance each is
+        # credited with while adding nothing a model can use.
         out = out.join(
             _team_round_rolling(out), on=["season", "round", "constructor_id"], how="left"
-        ).with_columns(
-            (1.0 - pl.col("team_dnf_rate")).alias("team_reliability"),
         )
 
         if block_config.teammate_head_to_head:

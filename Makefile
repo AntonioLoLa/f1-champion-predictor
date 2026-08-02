@@ -11,11 +11,12 @@ help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
-setup: ## Create the virtualenv (Python 3.12) and install the project with dev extras
+setup: ## Create the virtualenv (Python 3.12) and install pinned deps + the project
 	$(UV) venv --python 3.12 .venv
-	$(UV) pip install --python $(PYTHON) -e ".[dev,telemetry,kaggle]"
+	$(UV) pip install --python $(PYTHON) -r requirements.lock
+	$(UV) pip install --python $(PYTHON) --no-deps -e ".[dev,telemetry,kaggle]"
 
-lock: ## Freeze the current environment into requirements.lock (used by the Docker build)
+lock: ## Freeze the current environment into requirements.lock (used by setup and the Docker build)
 	$(UV) pip freeze --python $(PYTHON) --exclude-editable > requirements.lock
 
 lint: ## Ruff + Black (check only) + mypy

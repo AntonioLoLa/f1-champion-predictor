@@ -85,6 +85,14 @@ def render(client: DashboardApiClient) -> None:
         meta=[(f"{season} · {len(rounds)} rounds scored", "accent")],
     )
 
+    if not rounds[0]["is_out_of_sample"]:
+        st.warning(
+            "The active model was fitted on data that includes this season, so this replay "
+            "shows a result it already knows -- it looks far stronger than the model's real "
+            "skill. See the Model leaderboard page for the honest, walk-forward number.",
+            icon=":material/history:",
+        )
+
     # How early the model settled on its eventual pick: the first round after which it
     # never changed its mind again.
     leaders = frame.loc[frame.groupby("round")["probability"].idxmax()].sort_values("round")

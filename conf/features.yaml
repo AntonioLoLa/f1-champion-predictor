@@ -56,8 +56,6 @@ features:
   filters:
     # Seasons with very few rounds make momentum features meaningless.
     min_rounds_in_season: 5
-    # Drivers who never took a start in that season carry no signal.
-    exclude_non_starters: true
 
   # Columns carried through the pipeline for grouping/reporting but never fed to a model.
   metadata_columns:
@@ -70,3 +68,6 @@ features:
     - race_date
     - circuit_id
     - status
+    # `finished` is `entered AND NOT is_dnf`; both of those are already features, so it
+    # carries no information of its own and only splits their attributed importance.
+    - finished

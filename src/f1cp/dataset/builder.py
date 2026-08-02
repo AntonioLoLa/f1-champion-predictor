@@ -157,7 +157,28 @@ def _attach_target(frame: pl.DataFrame, uow: UnitOfWork, target_column: str) -> 
 
 
 def _apply_filters(frame: pl.DataFrame, settings: Settings) -> pl.DataFrame:
-    """Apply the season-range bound and the row-level filters from configuration."""
+    """Apply the season-range bound and the row-level filters from configuration.
+
+    Deliberately *not* filtered here: rows where ``entered`` is false, i.e. rounds a driver
+    sat out while still contesting the championship. Dropping them was the single most
+    damaging defect this project has had, and it is worth recording why.
+
+    The question the model answers is "after round R, who wins the title", and the answer
+    set is *everyone in the championship*, not everyone who started that Grand Prix.
+    Missing a race does not remove a driver from the standings. Dropping those rows meant
+    training and evaluation scored a population that inference never sees -- and, worse,
+    that :class:`~f1cp.models.normalizer.GroupProbabilityNormalizer` could be handed a
+    group with no champion in it at all. At the 2020 Sakhir Grand Prix (round 16 of 17)
+    Hamilton missed the race with COVID while leading the championship by 127 points. His
+    row was dropped, every remaining driver's calibrated probability was correctly near
+    zero -- and rescaling those to sum to one reported a 76% title probability for a
+    mathematically eliminated Bottas, which no metric in the project could see, because
+    :func:`~f1cp.training.metrics.group_log_loss` skips groups with no positive row.
+
+    Keeping the rows costs nothing elsewhere: the panel is dense *before* this filter, so
+    every rolling window already counted the missed round as a zero. Only membership of the
+    training set and of the normalisation group changes.
+    """
     filters = settings.features.filters
     out = frame.filter(
         (pl.col("season") >= settings.data.min_season)
@@ -166,13 +187,6 @@ def _apply_filters(frame: pl.DataFrame, settings: Settings) -> pl.DataFrame:
 
     if "rounds_total" in out.columns:
         out = out.filter(pl.col("rounds_total") >= filters.min_rounds_in_season)
-
-    if filters.exclude_non_starters and "entered" in out.columns:
-        # A row with `entered = False` is a round the driver sat out while still
-        # contesting the season (injury, standing down); it carries the state after
-        # that round but no round-level signal of its own, so it is dropped from the
-        # modelling dataset rather than duplicating the previous round's contribution.
-        out = out.filter(pl.col("entered"))
 
     return out
 

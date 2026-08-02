@@ -101,7 +101,7 @@ class OpenF1Provider(EnrichmentProvider):
             return pl.DataFrame()
 
         # Meetings come back in calendar order, which is round order.
-        by_round = {index: meeting for index, meeting in enumerate(meetings, start=1)}
+        by_round = dict(enumerate(meetings, start=1))
 
         frames = [
             frame

@@ -61,9 +61,6 @@ _NORMALIZED_COLUMN = "probability_normalized"
 _NEW_METRIC_NAMES = frozenset(
     {
         "accuracy",
-        "precision",
-        "recall",
-        "f1",
         "true_positive",
         "false_positive",
         "false_negative",

@@ -67,7 +67,7 @@ class KaggleProvider(BulkHistoryProvider):
         return Path(path)
 
     def _read(self, directory: Path, filename: str) -> pl.DataFrame:
-        """Read one CSV of the dataset, tolerating its ``\\N`` null marker."""
+        r"""Read one CSV of the dataset, tolerating its ``\N`` null marker."""
         path = directory / filename
         if not path.exists():
             logger.warning("Kaggle dataset is missing %s", filename)
@@ -284,8 +284,10 @@ def _mark_sprint_weekends(bundle: DataBundle) -> None:
     sprints = bundle.get(TableName.SPRINT_RESULTS)
     if not races.height or not sprints.height:
         return
-    sprint_rounds = sprints.select(["season", "round"]).unique().with_columns(
-        pl.lit(value=True).alias("is_sprint")
+    sprint_rounds = (
+        sprints.select(["season", "round"])
+        .unique()
+        .with_columns(pl.lit(value=True).alias("is_sprint"))
     )
     bundle.tables[TableName.RACES] = (
         races.drop("has_sprint")

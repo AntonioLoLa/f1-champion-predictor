@@ -341,6 +341,20 @@ class ModelVersion(Base):
     oof_predictions_path: Mapped[str | None] = mapped_column(Text)
     """Parquet of every walk-forward fold's held-out, leakage-free predictions."""
 
+    fit_seasons: Mapped[list[int] | None] = mapped_column(JSONType)
+    """Seasons the deployed artifact was actually fitted on.
+
+    Recorded so a served prediction can say whether it is out of sample. The deployed model
+    is refit on nearly every completed season, so scoring a *historical* round replays a
+    season the model was trained on, and the result flatters it enormously -- on 2007 the
+    refit model picks the champion at 94% of rounds where its own walk-forward predictions
+    managed 29%. Both numbers are honest about different questions; showing the first
+    without saying which one it is, is not.
+    """
+
+    calibration_seasons: Mapped[list[int] | None] = mapped_column(JSONType)
+    """Seasons held out of the fit to train the probability calibrator."""
+
     artifact_path: Mapped[str] = mapped_column(Text, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_best: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

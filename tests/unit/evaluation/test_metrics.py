@@ -31,9 +31,9 @@ def test_compute_full_metrics_scores_a_perfectly_ranked_frame() -> None:
         group_columns=["season", "round"],
     )
     assert result["accuracy"] == pytest.approx(1.0)
-    assert result["precision"] == pytest.approx(1.0)
-    assert result["recall"] == pytest.approx(1.0)
-    assert result["f1"] == pytest.approx(1.0)
+    assert "precision" not in result
+    assert "recall" not in result
+    assert "f1" not in result
     assert result["true_positive"] == 2
     assert result["false_positive"] == 0
     assert result["false_negative"] == 0

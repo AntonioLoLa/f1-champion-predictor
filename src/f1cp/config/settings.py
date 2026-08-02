@@ -342,7 +342,6 @@ class FeatureFiltersConfig(_Base):
     """Row-level filters applied while building the dataset."""
 
     min_rounds_in_season: int = 5
-    exclude_non_starters: bool = True
 
 
 class FeaturesConfig(_Base):
@@ -387,6 +386,8 @@ class SelectionConfig(_Base):
 
     primary_metric: str = "group_log_loss"
     direction: Literal["minimize", "maximize"] = "minimize"
+    one_standard_error: bool = True
+    preference_order: list[str] = Field(default_factory=list)
     tie_breakers: list[str] = Field(default_factory=list)
 
 

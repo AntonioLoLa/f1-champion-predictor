@@ -96,27 +96,15 @@ jobs:
         # `build` targets a named service directly, independent of profile activation.
         run: docker compose build pipeline
 
-      - name: Build and start the default stack
-        run: docker compose up -d --build
-
-      - name: Wait for the API to become healthy
-        run: timeout 120 bash -c 'until curl -sf http://localhost:8000/health; do sleep 3; done'
-
-      - name: Wait for the dashboard to become healthy
-        run: timeout 90 bash -c 'until curl -sf http://localhost:8501/_stcore/health; do sleep 3; done'
-
-      - name: Confirm every container reports healthy
+      - name: Build and start the default stack, waiting on every healthcheck
+        # `--wait` blocks on Docker's own healthcheck state machine and fails loudly if any
+        # service reports unhealthy or times out -- one source of truth, instead of racing
+        # an app-level curl poll against Docker's independently-scheduled health probes
+        # (start_period/interval), which could report a container still "starting" a beat
+        # after the app had already started responding to direct requests.
         run: |
+          docker compose up -d --build --wait --wait-timeout 180
           docker compose ps
-          for container_id in $(docker compose ps -q); do
-            status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container_id")
-            name=$(docker inspect --format '{{.Name}}' "$container_id")
-            echo "$name: $status"
-            if [ "$status" != "healthy" ] && [ "$status" != "none" ]; then
-              echo "::error::$name reports health status '$status'"
-              exit 1
-            fi
-          done
 
       - name: Dump logs on failure
         if: failure()

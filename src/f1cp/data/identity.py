@@ -173,9 +173,7 @@ class IdentityResolver:
         )
         return resolver
 
-    def _map_constructors_by_lineup(
-        self, canonical: pl.DataFrame, foreign: pl.DataFrame
-    ) -> None:
+    def _map_constructors_by_lineup(self, canonical: pl.DataFrame, foreign: pl.DataFrame) -> None:
         """Match constructors by the set of drivers they field in a season.
 
         Name and identifier matching both fail across F1's frequent team renames: Jolpica
@@ -209,9 +207,7 @@ class IdentityResolver:
                 continue
 
             best_id, best_overlap = None, 0
-            for (canonical_season, canonical_id), canonical_drivers in (
-                canonical_lineups.items()
-            ):
+            for (canonical_season, canonical_id), canonical_drivers in canonical_lineups.items():
                 if canonical_season != season:
                     continue
                 overlap = len(drivers & canonical_drivers)
@@ -306,7 +302,6 @@ class IdentityResolver:
 
             target[foreign_id] = candidate
 
-
     def apply(self, bundle: DataBundle) -> DataBundle:
         """Rewrite every identifier column of a bundle into the canonical vocabulary.
 
@@ -355,6 +350,4 @@ def _rewrite(
         frame = bundle.tables.get(table)
         if frame is None or not frame.height or column not in frame.columns:
             continue
-        bundle.tables[table] = frame.with_columns(
-            pl.col(column).replace(mapping).alias(column)
-        )
+        bundle.tables[table] = frame.with_columns(pl.col(column).replace(mapping).alias(column))

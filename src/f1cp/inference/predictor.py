@@ -27,7 +27,7 @@ from f1cp.domain.elimination import TitleContention, title_contention
 from f1cp.explain.shap_explainer import explain as explain_shap
 from f1cp.features.pipeline import run_pipeline
 from f1cp.logging_config import get_logger
-from f1cp.models.normalizer import GroupProbabilityNormalizer
+from f1cp.models.normalizer import normalize_round_probabilities
 
 if TYPE_CHECKING:
     from sklearn.pipeline import Pipeline
@@ -96,6 +96,12 @@ class RoundPredictions:
         round: Round within the season.
         model_version_id: The model version that produced these probabilities.
         model_name: Name of that model version.
+        is_out_of_sample: Whether the serving model saw this season during training. False
+            means these probabilities are a replay of a season the model already knows the
+            ending of, and they will look far better than the model really is -- the
+            honest figure for a past season is the walk-forward one on the model
+            performance page. True for the live season, which is the only one that has not
+            happened yet.
         drivers: Ranked predictions, best-placed first.
     """
 
@@ -103,6 +109,7 @@ class RoundPredictions:
     round: int
     model_version_id: int
     model_name: str
+    is_out_of_sample: bool
     drivers: list[DriverPrediction]
 
 
@@ -438,8 +445,11 @@ class PredictionService:
             pl.Series(_RAW_COLUMN, raw),
         )
         group_columns = self._settings.training.normalisation.group_columns
-        normalized = GroupProbabilityNormalizer(group_columns).normalize(
-            scored, _PROBABILITY_COLUMN
+        normalized = normalize_round_probabilities(
+            scored,
+            probability_column=_PROBABILITY_COLUMN,
+            group_columns=group_columns,
+            enabled=self._settings.training.normalisation.enabled,
         )
         return normalized.with_columns(
             pl.col(_NORMALIZED_COLUMN)
@@ -543,6 +553,26 @@ def _resolve_season_round(
     return latest.season, latest.round
 
 
+def is_out_of_sample(model_version: ModelVersion, season: int) -> bool:
+    """Whether ``season`` was unseen when ``model_version``'s artifact was fitted.
+
+    A model version with no recorded seasons predates this bookkeeping; report ``False``,
+    since "we cannot show that this is out of sample" is the honest reading and the
+    conservative one.
+
+    Args:
+        model_version: The model version doing the scoring.
+        season: The championship year being scored.
+
+    Returns:
+        ``True`` only if the season appears in neither the fit nor the calibration set.
+    """
+    fit = model_version.fit_seasons
+    if not fit:
+        return False
+    return season not in set(fit) | set(model_version.calibration_seasons or [])
+
+
 def _to_round_predictions(
     scored: pl.DataFrame,
     season: int,
@@ -568,5 +598,6 @@ def _to_round_predictions(
         round=round_number,
         model_version_id=model_version.id,
         model_name=model_version.name,
+        is_out_of_sample=is_out_of_sample(model_version, season),
         drivers=drivers,
     )

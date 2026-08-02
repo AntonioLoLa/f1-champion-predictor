@@ -1,8 +1,24 @@
 """A small, hand-consistent synthetic championship used by the feature test suite.
 
-Two seasons, four rounds each, three drivers, two constructors -- enough to exercise every
-feature block (including a sprint round and a mid-field DNF) without the size of a real
-bootstrap, and entirely deterministic so leakage tests can compare exact values.
+Three seasons, six rounds, four drivers, two constructors. Every element beyond the bare
+minimum is here because a real defect slipped past the earlier, tidier version of this
+fixture -- where three drivers contested every round of every season, no circuit repeated,
+and nobody ever arrived or missed a race:
+
+* **A circuit raced twice in one season** (``circuit_a`` at rounds 1 and 4). The circuit
+  block used to join its history on ``(season, round, driver, circuit)``, which only ever
+  matched in exactly this situation -- so against real data 99.7% of the feature was null
+  and against this fixture it was never exercised at all.
+* **A mid-season debutant** (``d4``, from round 3 of the final season). Season rate
+  features divided by rounds *elapsed* rather than rounds *started*, which is invisible
+  unless somebody joins late.
+* **A driver missing a round** (``d2``, round 3 of the middle season). A driver who sits
+  out is still in the championship and must still get a panel row; dropping those rows is
+  what once let a round's probabilities be rescaled without the eventual champion in them.
+* **A retirement** (``d3``, round 1 of the final season) and **a sprint round**, both
+  carried over from the original fixture.
+
+Every value is deterministic so the leakage test can compare exact numbers.
 """
 
 from __future__ import annotations
@@ -14,20 +30,72 @@ import polars as pl
 from f1cp.domain.scoring import points_system_for
 from f1cp.features.context import SourceFrames
 
-SEASONS = (2020, 2021)
-ROUNDS = (1, 2, 3, 4)
-DRIVERS = ("d1", "d2", "d3")
-CONSTRUCTOR_OF = {"d1": "alpha", "d2": "alpha", "d3": "beta"}
+SEASONS = (2019, 2020, 2021)
+ROUNDS = (1, 2, 3, 4, 5, 6)
+DRIVERS = ("d1", "d2", "d3", "d4")
+CONSTRUCTOR_OF = {"d1": "alpha", "d2": "alpha", "d3": "beta", "d4": "beta"}
+
+# `circuit_a` and `circuit_b` are each raced twice a season: enough for a driver to build a
+# per-circuit history, and the case the circuit block's join used to depend on.
+CIRCUIT_OF_ROUND = {
+    1: "circuit_a",
+    2: "circuit_b",
+    3: "circuit_c",
+    4: "circuit_a",
+    5: "circuit_d",
+    6: "circuit_b",
+}
 CIRCUITS = ("circuit_a", "circuit_b", "circuit_c", "circuit_d")
-SPRINT_ROUND = {2020: None, 2021: 2}
-# One deliberate retirement, to exercise DNF / finish-rate features.
-DNF = {(2021, 1, "d3")}
+
+SPRINT_ROUND = {2019: None, 2020: None, 2021: 2}
+
+#: ``d4`` is a mid-season arrival in the last season and never appears before that.
+DEBUT = {"d1": (2019, 1), "d2": (2019, 1), "d3": (2019, 1), "d4": (2021, 3)}
+
+#: A round a driver sat out while still contesting the championship.
+ABSENCES = {(2020, 3, "d2")}
+
+#: One deliberate retirement, to exercise DNF / rate features. Lands on whoever this
+#: round's rotation puts in P1, so that round also has no classified winner.
+DNF = {(2021, 1, "d1")}
 
 
-def _finish_order(season: int, round_number: int) -> list[str]:
-    """A deterministic, round-varying finishing order for the three drivers."""
-    rotation = (round_number + (season - 2020)) % len(DRIVERS)
-    return DRIVERS[rotation:] + DRIVERS[:rotation]
+def entrants(season: int, round_number: int) -> tuple[str, ...]:
+    """Drivers who took part in one round, in classification order.
+
+    Args:
+        season: Championship year.
+        round_number: Round within the season.
+
+    Returns:
+        The driver ids that started, ordered by finishing position.
+    """
+    started = [
+        driver_id
+        for driver_id in DRIVERS
+        if DEBUT[driver_id] <= (season, round_number)
+        and (season, round_number, driver_id) not in ABSENCES
+    ]
+    rotation = (round_number + (season - SEASONS[0])) % len(started)
+    return tuple(started[rotation:] + started[:rotation])
+
+
+def expected_panel_rows() -> int:
+    """How many ``(season, round, driver)`` rows the panel should hold.
+
+    A driver joins the panel at their season debut and stays for every later round,
+    whether or not they started it -- so this counts rounds from debut onwards, not
+    rounds actually contested.
+    """
+    total = 0
+    for season in SEASONS:
+        for driver_id in DRIVERS:
+            debut_season, debut_round = DEBUT[driver_id]
+            if debut_season > season:
+                continue
+            first = debut_round if debut_season == season else ROUNDS[0]
+            total += len([r for r in ROUNDS if r >= first])
+    return total
 
 
 def build_synthetic_sources() -> SourceFrames:
@@ -46,13 +114,13 @@ def build_synthetic_sources() -> SourceFrames:
 
     for season in SEASONS:
         system = points_system_for(season)
-        cumulative_points = dict.fromkeys(DRIVERS, 0.0)
-        cumulative_wins: dict[str, int] = dict.fromkeys(DRIVERS, 0)
+        cumulative_points: dict[str, float] = {}
+        cumulative_wins: dict[str, int] = {}
         team_points = {"alpha": 0.0, "beta": 0.0}
         team_wins = {"alpha": 0, "beta": 0}
 
         for round_number in ROUNDS:
-            circuit_id = CIRCUITS[(round_number - 1) % len(CIRCUITS)]
+            circuit_id = CIRCUIT_OF_ROUND[round_number]
             race_date = dt.date(season, 3, 1) + dt.timedelta(days=21 * (round_number - 1))
             has_sprint = SPRINT_ROUND[season] == round_number
             races_rows.append(
@@ -66,12 +134,15 @@ def build_synthetic_sources() -> SourceFrames:
                 }
             )
 
-            order = _finish_order(season, round_number)
+            order = entrants(season, round_number)
             for position, driver_id in enumerate(order, start=1):
+                cumulative_points.setdefault(driver_id, 0.0)
+                cumulative_wins.setdefault(driver_id, 0)
+
                 is_dnf = (season, round_number, driver_id) in DNF
                 finish_position = None if is_dnf else position
                 race_points = 0.0 if is_dnf else float(system.race_points[position - 1])
-                grid = ((position + 1) % len(DRIVERS)) + 1
+                grid = ((position + 1) % len(order)) + 1
 
                 result_rows.append(
                     {
@@ -126,7 +197,9 @@ def build_synthetic_sources() -> SourceFrames:
                     cumulative_points[driver_id] += sprint_points
                     team_points[CONSTRUCTOR_OF[driver_id]] += sprint_points
 
-            ranked_drivers = sorted(DRIVERS, key=lambda d: (-cumulative_points[d], d))
+            # Standings list everyone who has entered the championship so far this season,
+            # including anyone sitting this round out.
+            ranked_drivers = sorted(cumulative_points, key=lambda d: (-cumulative_points[d], d))
             for standings_position, driver_id in enumerate(ranked_drivers, start=1):
                 driver_standing_rows.append(
                     {
@@ -228,13 +301,18 @@ def build_synthetic_sources() -> SourceFrames:
     )
     drivers = pl.DataFrame(
         {
-            "driver_id": ["d1", "d2", "d3"],
-            "code": ["DR1", "DR2", "DR3"],
-            "permanent_number": [1, 2, 3],
-            "given_name": ["Driver", "Driver", "Driver"],
-            "family_name": ["One", "Two", "Three"],
-            "date_of_birth": [dt.date(1995, 1, 1), dt.date(1998, 6, 15), dt.date(2001, 11, 30)],
-            "nationality": ["Dutch", "British", "Monegasque"],
+            "driver_id": list(DRIVERS),
+            "code": ["DR1", "DR2", "DR3", "DR4"],
+            "permanent_number": [1, 2, 3, 4],
+            "given_name": ["Driver", "Driver", "Driver", "Driver"],
+            "family_name": ["One", "Two", "Three", "Four"],
+            "date_of_birth": [
+                dt.date(1995, 1, 1),
+                dt.date(1998, 6, 15),
+                dt.date(2001, 11, 30),
+                dt.date(2003, 4, 9),
+            ],
+            "nationality": ["Dutch", "British", "Monegasque", "Italian"],
         },
         schema={
             "driver_id": pl.String,
