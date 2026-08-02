@@ -342,7 +342,6 @@ class FeatureFiltersConfig(_Base):
     """Row-level filters applied while building the dataset."""
 
     min_rounds_in_season: int = 5
-    exclude_non_starters: bool = True
 
 
 class FeaturesConfig(_Base):
