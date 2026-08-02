@@ -11,6 +11,9 @@ training:
   validation:
     # Never a random split: train on past seasons, validate on the next one.
     strategy: expanding # expanding | rolling
+    # The base model is fit on this many seasons *minus* calibration_holdout_seasons below,
+    # not on this many outright -- the last few are carved out for the calibrator first.
+    # 15 here with a holdout of 3 means the base model actually sees 12 seasons.
     min_train_seasons: 15
     test_horizon_seasons: 1
     rolling_window_seasons: 15
@@ -36,7 +39,25 @@ training:
   selection:
     primary_metric: group_log_loss
     direction: minimize
-    tie_breakers: [brier_score, expected_calibration_error]
+    # Thirty folds, one season each, and championships differ enormously in how early they
+    # are decided -- so the spread between folds is wide and a bare argmin over the means
+    # will happily declare a winner the data cannot distinguish from the runner-up. Take
+    # everything within one standard error of the best and choose by this order instead.
+    one_standard_error: true
+    # Simplest first: a linear model that ties with a gradient-boosted ensemble is the
+    # better answer, because it is the one whose behaviour can be read off its coefficients.
+    preference_order:
+      - logistic_regression
+      - random_forest
+      - lightgbm
+      - xgboost
+      - catboost
+      - mlp
+      - svm
+      - knn
+    # Applied only when the preference order leaves candidates level. Both are error
+    # metrics, so lower always wins.
+    tie_breakers: [brier_score_normalized, expected_calibration_error_normalized]
 
   evaluation:
     # Season-phase buckets, by fraction of the season completed.
@@ -129,8 +150,14 @@ model_zoo:
       early_stopping: true
       n_iter_no_change: 25
 
+  # Disabled: both are significantly behind the leaders on the selection metric
+  # (paired p = 0.007 and p < 0.001 over 30 folds), and both are disproportionately
+  # expensive -- `SVC(probability=True)` fits an internal 5-fold Platt calibrator inside
+  # every one of the 30 outer folds, and k-NN is the only candidate with no fast native
+  # SHAP explainer, so a cold `/explain` falls back to ~885k `predict_proba` calls.
+  # Together they were ~70% of a training run's wall clock. Flip `enabled` to re-run them.
   svm:
-    enabled: true
+    enabled: false
     estimator: svm
     scale_features: true
     params:
@@ -142,7 +169,7 @@ model_zoo:
       max_iter: 5000
 
   knn:
-    enabled: true
+    enabled: false
     estimator: knn
     scale_features: true
     params:

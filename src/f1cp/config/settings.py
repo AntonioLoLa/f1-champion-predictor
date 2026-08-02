@@ -386,6 +386,8 @@ class SelectionConfig(_Base):
 
     primary_metric: str = "group_log_loss"
     direction: Literal["minimize", "maximize"] = "minimize"
+    one_standard_error: bool = True
+    preference_order: list[str] = Field(default_factory=list)
     tie_breakers: list[str] = Field(default_factory=list)
 
 
