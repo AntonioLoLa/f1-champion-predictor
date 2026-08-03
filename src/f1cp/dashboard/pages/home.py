@@ -129,6 +129,15 @@ def render(client: DashboardApiClient) -> None:
         ],
     )
 
+    if not latest["is_out_of_sample"]:
+        st.warning(
+            "This model was fitted on data that includes this season, so this overview is "
+            "a replay of a result it already knows -- it looks far stronger than the "
+            "model's real skill. See the Model leaderboard page for the honest, "
+            "walk-forward number.",
+            icon=":material/history:",
+        )
+
     stat_grid(_headline_stats(latest["drivers"], contenders))
 
     section(
