@@ -14,6 +14,7 @@ inference must always reflect whatever has actually been ingested.
 
 from __future__ import annotations
 
+import threading
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -156,6 +157,12 @@ class PredictionService:
     application (see :meth:`f1cp.container.AppContext.predictor`). Everything keyed on
     :func:`~f1cp.dataset.loader.source_data_revision` is re-checked against the database
     on every call, so newly ingested data is never served from a cache.
+
+    FastAPI dispatches synchronous routes to worker threads, so this instance is genuinely
+    shared across concurrent requests, not just across sequential ones. Each cache's
+    read-evict-insert sequence is therefore guarded by its own lock -- without it, two
+    requests racing the same cache miss could both try to evict the same now-stale key and
+    the second `del` would raise `KeyError` on an unrelated request.
     """
 
     def __init__(self, settings: Settings, *, panel_cache_size: int = _PANEL_CACHE_SIZE) -> None:
@@ -170,9 +177,12 @@ class PredictionService:
         """
         self._settings = settings
         self._pipeline_cache: dict[str, Pipeline] = {}
+        self._pipeline_cache_lock = threading.Lock()
         self._panel_cache: OrderedDict[tuple[tuple[int, ...], int], pl.DataFrame] = OrderedDict()
         self._panel_cache_size = panel_cache_size
+        self._panel_cache_lock = threading.Lock()
         self._explain_cache: OrderedDict[_ExplainKey, ExplainResult] = OrderedDict()
+        self._explain_cache_lock = threading.Lock()
         mlflow.set_tracking_uri(settings.mlflow.tracking_uri)
 
     def predict_round(
@@ -305,9 +315,11 @@ class PredictionService:
             resolved_season,
             resolved_round,
         )
-        if (memoised := self._explain_cache.get(cache_key)) is not None:
-            self._explain_cache.move_to_end(cache_key)
-            return memoised
+        with self._explain_cache_lock:
+            memoised = self._explain_cache.get(cache_key)
+            if memoised is not None:
+                self._explain_cache.move_to_end(cache_key)
+                return memoised
 
         frame = self._engineered_frame(uow, max_season=resolved_season)
         round_frame = frame.filter(
@@ -338,11 +350,12 @@ class PredictionService:
             importances=result.importances,
         )
 
-        for stale in [key for key in self._explain_cache if key[0] != cache_key[0]]:
-            del self._explain_cache[stale]
-        self._explain_cache[cache_key] = explained
-        while len(self._explain_cache) > _EXPLAIN_CACHE_SIZE:
-            self._explain_cache.popitem(last=False)
+        with self._explain_cache_lock:
+            for stale in [key for key in self._explain_cache if key[0] != cache_key[0]]:
+                del self._explain_cache[stale]
+            self._explain_cache[cache_key] = explained
+            while len(self._explain_cache) > _EXPLAIN_CACHE_SIZE:
+                self._explain_cache.popitem(last=False)
         return explained
 
     def title_contention(
@@ -398,10 +411,16 @@ class PredictionService:
         """
         revision = source_data_revision(uow)
         key = (revision, max_season)
-        if (cached := self._panel_cache.get(key)) is not None:
-            self._panel_cache.move_to_end(key)
-            return cached
+        with self._panel_cache_lock:
+            cached = self._panel_cache.get(key)
+            if cached is not None:
+                self._panel_cache.move_to_end(key)
+                return cached
 
+        # Built outside the lock: this is the expensive step, and holding the lock here
+        # would serialise every concurrent request on the slowest one instead of just on
+        # the cache bookkeeping. A concurrent miss on the same key rebuilds it twice
+        # rather than blocking, which only costs some redundant work, never a wrong answer.
         sources = load_source_frames(uow, max_season=max_season)
         frame = run_pipeline(sources, self._settings.features, self._settings.paths)
         names = sources.drivers.select(
@@ -411,13 +430,14 @@ class PredictionService:
         panel = frame.join(names, on="driver_id", how="left")
 
         if self._panel_cache_size > 0:
-            # Panels built from superseded data can never be served again, so drop them
-            # rather than let them occupy a slot until they age out of the LRU.
-            for stale in [k for k in self._panel_cache if k[0] != revision]:
-                del self._panel_cache[stale]
-            self._panel_cache[key] = panel
-            while len(self._panel_cache) > self._panel_cache_size:
-                self._panel_cache.popitem(last=False)
+            with self._panel_cache_lock:
+                # Panels built from superseded data can never be served again, so drop
+                # them rather than let them occupy a slot until they age out of the LRU.
+                for stale in [k for k in self._panel_cache if k[0] != revision]:
+                    del self._panel_cache[stale]
+                self._panel_cache[key] = panel
+                while len(self._panel_cache) > self._panel_cache_size:
+                    self._panel_cache.popitem(last=False)
         return panel
 
     def _score(self, frame: pl.DataFrame, model_version: ModelVersion) -> pl.DataFrame:
@@ -461,10 +481,16 @@ class PredictionService:
 
     def _load_pipeline(self, uri: str) -> Pipeline:
         """Load (and cache) a pipeline logged to MLflow."""
-        if uri not in self._pipeline_cache:
-            logger.info("Loading model from MLflow", extra={"uri": uri})
-            self._pipeline_cache[uri] = mlflow.sklearn.load_model(uri)
-        return self._pipeline_cache[uri]
+        with self._pipeline_cache_lock:
+            cached = self._pipeline_cache.get(uri)
+        if cached is not None:
+            return cached
+
+        logger.info("Loading model from MLflow", extra={"uri": uri})
+        pipeline = mlflow.sklearn.load_model(uri)
+        with self._pipeline_cache_lock:
+            self._pipeline_cache[uri] = pipeline
+        return pipeline
 
     def _persist(self, uow: UnitOfWork, scored: pl.DataFrame, model_version_id: int) -> None:
         """Upsert scored rows into the ``predictions`` table for traceability."""
