@@ -71,3 +71,9 @@ features:
     # `finished` is `entered AND NOT is_dnf`; both of those are already features, so it
     # carries no information of its own and only splits their attributed importance.
     - finished
+    # r=0.9998 with `finish_position` among classified finishers, and for a DNF its value
+    # is not even consistent across providers: f1db reports the real classification order,
+    # jolpica falls back to a flat 99 (see providers/jolpica.py). A feature whose meaning
+    # for the same event type depends on which provider ingested that round is noise, not
+    # signal a model should be allowed to find weight for.
+    - position_order
