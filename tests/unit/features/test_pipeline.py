@@ -116,6 +116,27 @@ def test_season_rates_divide_by_rounds_started_not_rounds_elapsed(
     assert after_debut["points_finish_rate"].item() in {0.0, 1.0}
 
 
+def test_momentum_divides_by_rounds_started_not_window_size(
+    features_config: FeaturesConfig, paths: PathsConfig
+) -> None:
+    """A driver's 2nd-ever round must not read as a form decline.
+
+    ``d4`` debuts at round 3 and has started exactly one round coming into round 4, so
+    their "recent" window and "season so far" window cover the identical single result:
+    momentum (their difference) must be exactly 0.0, never a fraction of the window size.
+    """
+    frame = run_pipeline(build_synthetic_sources(), features_config, paths)
+
+    debut_season, debut_round = DEBUT["d4"]
+    after_debut = frame.filter(
+        (pl.col("season") == debut_season)
+        & (pl.col("round") == debut_round + 1)
+        & (pl.col("driver_id") == "d4")
+    )
+    assert after_debut.height == 1
+    assert after_debut["momentum"].item() == pytest.approx(0.0)
+
+
 def test_pipeline_columns_are_numeric_or_boolean(
     features_config: FeaturesConfig, paths: PathsConfig
 ) -> None:
