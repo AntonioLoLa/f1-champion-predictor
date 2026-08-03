@@ -1,7 +1,7 @@
 # F1 Championship Predictor
 
-[![CI](https://github.com/antoniolozano/f1-champion-predictor/actions/workflows/ci.yml/badge.svg)](https://github.com/antoniolozano/f1-champion-predictor/actions/workflows/ci.yml)
-[![Nightly data update](https://github.com/antoniolozano/f1-champion-predictor/actions/workflows/nightly-update.yml/badge.svg)](https://github.com/antoniolozano/f1-champion-predictor/actions/workflows/nightly-update.yml)
+[![CI](https://github.com/AntonioLoLa/f1-champion-predictor/actions/workflows/ci.yml/badge.svg)](https://github.com/AntonioLoLa/f1-champion-predictor/actions/workflows/ci.yml)
+[![Nightly data update](https://github.com/AntonioLoLa/f1-champion-predictor/actions/workflows/nightly-update.yml/badge.svg)](https://github.com/AntonioLoLa/f1-champion-predictor/actions/workflows/nightly-update.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](pyproject.toml)
 
