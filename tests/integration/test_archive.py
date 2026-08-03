@@ -33,6 +33,15 @@ def client(settings: Settings, tmp_path: Path):
     database = Database(fast_settings.database)
     database.create_all()
     _seed(database)
+
+    with database.session_scope() as uow:
+        race_id = uow.races.id_map()[(2020, 1)]
+        uow.results.upsert_pit_stops(
+            [
+                {"race_id": race_id, "driver_id": "d1", "stop": 1, "lap": 12, "duration_ms": 23145},
+                {"race_id": race_id, "driver_id": "d2", "stop": 1, "lap": 14, "duration_ms": 21980},
+            ]
+        )
     database.dispose()
 
     with TestClient(create_app(settings=fast_settings)) as test_client:
@@ -89,6 +98,28 @@ def test_race_results_404_for_a_round_that_has_not_been_run(client) -> None:
     assert response.status_code == 404
 
 
+def test_pit_stops_lists_stops_for_a_race(client) -> None:
+    stops = client.get("/seasons/2020/races/1/pit-stops").json()
+
+    assert [row["driver_id"] for row in stops] == ["d1", "d2"]
+    assert stops[0]["stop"] == 1
+    assert stops[0]["lap"] == 12
+    assert stops[0]["driver_name"]
+
+
+def test_pit_stops_is_empty_but_not_404_for_a_race_with_no_recorded_stops(client) -> None:
+    response = client.get("/seasons/2020/races/2/pit-stops")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_pit_stops_404_for_a_round_that_has_not_been_run(client) -> None:
+    response = client.get("/seasons/2021/races/4/pit-stops")
+
+    assert response.status_code == 404
+
+
 def test_constructor_standings_default_to_the_latest_completed_round(client) -> None:
     latest = client.get("/seasons/2020/constructor-standings").json()
     explicit = client.get(
@@ -112,6 +143,7 @@ def test_archive_works_without_any_trained_model(client) -> None:
         "/seasons",
         "/seasons/2020/races",
         "/seasons/2020/races/1/results",
+        "/seasons/2020/races/1/pit-stops",
         "/seasons/2020/constructor-standings",
     ):
         assert client.get(path).status_code == 200, path
