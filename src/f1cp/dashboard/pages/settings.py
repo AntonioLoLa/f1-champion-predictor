@@ -58,6 +58,14 @@ def render(client: DashboardApiClient) -> None:
         ]
     )
 
+    if health.get("read_only"):
+        st.info(
+            "This deployment is read-only: ingesting data and starting training runs are "
+            "disabled so a shared public instance can't be retrained or broken by a visitor.",
+            icon=":material/lock:",
+        )
+        return
+
     section(
         "Ingest race data",
         "Mirrors `f1cp data update`. A full bootstrap walks decades of results and takes a "

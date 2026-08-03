@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from f1cp.api.deps import get_database
+from f1cp.api.deps import get_database, require_write_access
 from f1cp.api.schemas.model import ActivateModelResponse, ModelVersionSummary
 
 if TYPE_CHECKING:
@@ -53,7 +53,11 @@ def list_versions(database: Database = Depends(get_database)) -> list[ModelVersi
         return [_to_summary(version) for version in uow.models.list_versions()]
 
 
-@router.post("/{model_version_id}/activate", response_model=ActivateModelResponse)
+@router.post(
+    "/{model_version_id}/activate",
+    response_model=ActivateModelResponse,
+    dependencies=[Depends(require_write_access)],
+)
 def activate(
     model_version_id: int, database: Database = Depends(get_database)
 ) -> ActivateModelResponse:
@@ -67,7 +71,8 @@ def activate(
         The now-active model version.
 
     Raises:
-        HTTPException: 404 if no such model version exists.
+        HTTPException: 404 if no such model version exists, 403 if the service is
+            configured read-only.
     """
     with database.session_scope() as uow:
         try:

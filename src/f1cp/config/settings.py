@@ -147,6 +147,7 @@ class ApiConfig(_Base):
     title: str = "F1 Championship Predictor API"
     version: str = "0.1.0"
     cors_origins: list[str] = Field(default_factory=list)
+    read_only: bool = False
 
 
 class DashboardConfig(_Base):

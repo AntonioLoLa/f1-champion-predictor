@@ -13,3 +13,4 @@ class HealthResponse(BaseModel):
     status: str
     database: bool
     active_model: str | None
+    read_only: bool
