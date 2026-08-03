@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 __all__ = [
     "ConstructorStandingResponse",
+    "PitStopResponse",
     "RaceResultResponse",
     "RaceSummaryResponse",
     "SeasonListResponse",
@@ -71,6 +72,16 @@ class RaceResultResponse(BaseModel):
     status: str | None
     points: float
     finished: bool
+
+
+class PitStopResponse(BaseModel):
+    """One pit stop, in a single Grand Prix."""
+
+    driver_id: str
+    driver_name: str
+    stop: int
+    lap: int | None
+    duration_ms: int | None
 
 
 class ConstructorStandingResponse(BaseModel):

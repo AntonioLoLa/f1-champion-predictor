@@ -28,6 +28,8 @@ __all__ = [
     "data_table",
     "model_versions_columns",
     "model_versions_frame",
+    "pit_stops_columns",
+    "pit_stops_frame",
     "prediction_columns",
     "prediction_rows_frame",
     "race_calendar_columns",
@@ -305,6 +307,42 @@ def race_results_columns() -> dict[str, ColumnConfig]:
         "Laps": st.column_config.NumberColumn("Laps", width="small", format="%d"),
         "Status": st.column_config.TextColumn("Status", width="medium"),
         "Points": st.column_config.NumberColumn("Points", format="%.0f"),
+    }
+
+
+def pit_stops_frame(pit_stops: list[dict[str, Any]]) -> pd.DataFrame:
+    """One row per pit stop, driver then stop number.
+
+    Args:
+        pit_stops: A ``PitStopResponse`` list.
+
+    Returns:
+        A frame with the stop duration in seconds, which is how a pit stop is actually
+        talked about, rather than the milliseconds the source data stores it in.
+    """
+    frame = pd.DataFrame(pit_stops)
+    return frame.assign(
+        lap=frame["lap"].astype("Int64"),
+        duration_s=frame["duration_ms"] / 1000,
+    ).rename(
+        columns={
+            "driver_name": "Driver",
+            "stop": "Stop",
+            "lap": "Lap",
+            "duration_s": "Duration (s)",
+        }
+    )[
+        ["Driver", "Stop", "Lap", "Duration (s)"]
+    ]
+
+
+def pit_stops_columns() -> dict[str, ColumnConfig]:
+    """Formatting for :func:`pit_stops_frame`."""
+    return {
+        "Driver": st.column_config.TextColumn("Driver", width="medium"),
+        "Stop": st.column_config.NumberColumn("Stop", width="small", format="%d"),
+        "Lap": st.column_config.NumberColumn("Lap", width="small", format="%d"),
+        "Duration (s)": st.column_config.NumberColumn("Duration (s)", format="%.3f"),
     }
 
 
