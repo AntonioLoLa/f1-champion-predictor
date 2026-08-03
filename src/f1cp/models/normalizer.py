@@ -106,8 +106,8 @@ def normalize_round_probabilities(
     drivers who *can* still win, which is a small free improvement in group log loss.
 
     Args:
-        frame: Scored rows carrying ``probability_column``, the group columns and -- when
-            available -- :data:`ELIMINATED_COLUMN`.
+        frame: Scored rows carrying ``probability_column``, the group columns and, when
+            ``enabled``, :data:`ELIMINATED_COLUMN`.
         probability_column: The calibrated probability column to rescale.
         group_columns: Columns identifying a mutually-exclusive group.
         enabled: When false, the normalised column is a copy of the input and no
@@ -116,19 +116,31 @@ def normalize_round_probabilities(
 
     Returns:
         ``frame`` with a ``{probability_column}_normalized`` column added.
+
+    Raises:
+        ValueError: If ``enabled`` and :data:`ELIMINATED_COLUMN` is missing from ``frame``.
     """
     normalized_column = f"{probability_column}_normalized"
     if not enabled:
         return frame.with_columns(pl.col(probability_column).alias(normalized_column))
 
-    constrained = frame
-    if ELIMINATED_COLUMN in frame.columns:
-        constrained = frame.with_columns(
-            pl.when(pl.col(ELIMINATED_COLUMN).fill_null(value=False))
-            .then(0.0)
-            .otherwise(pl.col(probability_column))
-            .alias(probability_column)
+    if ELIMINATED_COLUMN not in frame.columns:
+        # Silently skipping this used to mean "disable the `season_context` feature block"
+        # was enough to quietly resurrect the exact fabricated-confidence bug this
+        # constraint exists to prevent, with no test or log line to catch it.
+        msg = (
+            f"{ELIMINATED_COLUMN!r} is missing from the frame being normalised, so the "
+            "elimination constraint would silently not apply. Enable the `season_context` "
+            "feature block, or call with enabled=False if that is genuinely intended."
         )
+        raise ValueError(msg)
+
+    constrained = frame.with_columns(
+        pl.when(pl.col(ELIMINATED_COLUMN).fill_null(value=False))
+        .then(0.0)
+        .otherwise(pl.col(probability_column))
+        .alias(probability_column)
+    )
 
     normalized = GroupProbabilityNormalizer(group_columns).normalize(
         constrained, probability_column
