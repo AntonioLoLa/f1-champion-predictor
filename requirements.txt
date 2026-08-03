@@ -1,0 +1,5 @@
+# Read by Streamlit Community Cloud (picked up automatically at the repo root next to
+# streamlit_app.py). Reuses the same lockfile the Docker images install from, so the
+# cloud deployment runs the exact versions everything else has been tested against.
+-r requirements.lock
+-e .
