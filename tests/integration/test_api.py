@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from f1cp.api.main import create_app
+from f1cp.db.models import ModelVersion
 from f1cp.db.session import Database
 from f1cp.domain.enums import RunStatus
 from tests.integration.test_dataset_builder import _seed
@@ -71,6 +72,43 @@ def test_model_endpoints_list_and_activate(settings: Settings, tmp_path: Path) -
 
         missing = client.post("/model/999999/activate")
         assert missing.status_code == 404
+
+
+def test_activating_a_version_with_no_logged_model_is_rejected(
+    settings: Settings, tmp_path: Path
+) -> None:
+    """A candidate whose MLflow logging failed or was skipped must not be activatable.
+
+    Otherwise `/predict` goes dark until someone notices, since there is nothing to load.
+    """
+    fast_settings = _fast_settings(settings, tmp_path)
+    database = Database(fast_settings.database)
+    database.create_all()
+    _seed(database)
+    artifact = _build_dataset(database, fast_settings)
+    active_id = _fit_and_register(fast_settings, database, artifact)
+
+    with database.session_scope() as uow:
+        active = uow.models.get(active_id)
+        broken = ModelVersion(
+            training_run_id=active.training_run_id,
+            name="broken-model",
+            algorithm="logistic_regression",
+            mlflow_model_uri=None,
+            artifact_path="models/broken-model",
+            feature_names=artifact.feature_names,
+        )
+        uow.models.add(broken)
+        uow.session.flush()
+        broken_id = broken.id
+    database.dispose()
+
+    with TestClient(create_app(settings=fast_settings)) as client:
+        response = client.post(f"/model/{broken_id}/activate")
+        assert response.status_code == 409
+
+        # The originally active model is untouched.
+        assert client.get("/model").json()["id"] == active_id
 
 
 def test_predict_and_predict_season_endpoints(settings: Settings, tmp_path: Path) -> None:

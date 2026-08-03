@@ -117,6 +117,32 @@ def test_predictor_page_shows_the_active_model(settings: Settings, tmp_path: Pat
         assert "2021 · Round 2" in text
 
 
+def test_home_page_warns_when_the_overview_is_in_sample(settings: Settings, tmp_path: Path) -> None:
+    """The landing page must not present a replayed season as honest performance.
+
+    ``_fit_and_register`` registers a model with no ``fit_seasons`` recorded, so
+    ``is_out_of_sample`` reads ``False`` -- exactly the case this warning exists for.
+    """
+    fast_settings = _fast_settings(settings, tmp_path)
+    database = Database(fast_settings.database)
+    database.create_all()
+    _seed(database)
+    artifact = _build_dataset(database, fast_settings)
+    _fit_and_register(fast_settings, database, artifact)
+    database.dispose()
+
+    app = create_app(settings=fast_settings)
+    with TestClient(app) as test_client:
+        api_client = DashboardApiClient("http://testserver", timeout_seconds=30, client=test_client)
+
+        at = AppTest.from_function(_run_page, args=("home", api_client), default_timeout=60)
+        at.run()
+
+        assert not at.exception
+        assert at.warning
+        assert "replay of a result it already knows" in at.warning[0].value
+
+
 def test_title_contention_page_shows_who_is_still_alive(settings: Settings, tmp_path: Path) -> None:
     # No trained model needed: title contention is pure standings/calendar reasoning.
     fast_settings = _fast_settings(settings, tmp_path)

@@ -81,9 +81,20 @@ class FormBlock(FeatureBlock):
                 .clip(lower_bound=1)
             ).alias("season_points_rate"),
         ).with_columns(
-            (pl.col(f"last_{block_config.windows[0]}_points") / block_config.windows[0]).alias(
-                "_recent_rate"
-            ),
+            # Rounds actually started within the window, not the window size itself --
+            # otherwise a driver's 2nd or 3rd career round (window not yet full) gets
+            # divided by a denominator larger than their real round count, understating
+            # their rate. Same reasoning as `season_points_rate` above, windowed to match
+            # `last_N_points`.
+            (
+                pl.col(f"last_{block_config.windows[0]}_points")
+                / pl.col("entered")
+                .cast(pl.Int32)
+                .shift(1)
+                .rolling_sum(window_size=block_config.windows[0], min_samples=1)
+                .over(group)
+                .clip(lower_bound=1)
+            ).alias("_recent_rate"),
         )
 
         trend_window = block_config.trend_window

@@ -32,6 +32,7 @@ class ConstructorBlock(FeatureBlock):
         "constructor_id",
         "current_points",
         "round_points",
+        "finish_position",
         "is_dnf",
         "entered",
     )
@@ -135,21 +136,31 @@ def _team_round_rolling(frame: pl.DataFrame) -> pl.DataFrame:
     ).select("season", "round", "constructor_id", "team_points_last_3", "team_dnf_rate")
 
 
+#: Sentinel finishing position for a DNF, worse than any position a classified car can
+#: hold -- so a retirement never counts as "beating" a teammate who finished, and two
+#: retirements in the same round are a tie rather than a spurious win for either side.
+_DNF_SENTINEL_POSITION = 999
+
+
 def _teammate_features(frame: pl.DataFrame) -> pl.DataFrame:
     """Compare each driver against their team-mate(s) in the same round.
 
     A driver line-up can change mid-season, so "team-mate" is resolved per round rather
     than per season: whoever else drove for the same constructor in that specific round.
+
+    Compared on finishing position, not round points: two team-mates outside the points
+    (common for the median team on the grid) both score zero, which made every such round
+    read as "beat neither", discarding the real gap between e.g. P11 and P16.
     """
     roster = frame.select(
-        "season", "round", "constructor_id", "driver_id", "current_points", "round_points"
+        "season", "round", "constructor_id", "driver_id", "current_points", "finish_position"
     )
     paired = roster.join(
         roster.rename(
             {
                 "driver_id": "_teammate_id",
                 "current_points": "_teammate_points",
-                "round_points": "_teammate_round_points",
+                "finish_position": "_teammate_finish_position",
             }
         ),
         on=["season", "round", "constructor_id"],
@@ -158,7 +169,10 @@ def _teammate_features(frame: pl.DataFrame) -> pl.DataFrame:
 
     per_round = paired.group_by(["season", "round", "driver_id"]).agg(
         pl.col("_teammate_points").mean().alias("_teammate_points_avg"),
-        (pl.col("round_points") > pl.col("_teammate_round_points"))
+        (
+            pl.col("finish_position").fill_null(_DNF_SENTINEL_POSITION)
+            < pl.col("_teammate_finish_position").fill_null(_DNF_SENTINEL_POSITION)
+        )
         .mean()
         .alias("_beat_teammate_this_round"),
     )
