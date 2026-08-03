@@ -71,10 +71,19 @@ def activate(
         The now-active model version.
 
     Raises:
-        HTTPException: 404 if no such model version exists, 403 if the service is
-            configured read-only.
+        HTTPException: 404 if no such model version exists, 409 if it has no logged model
+            to serve, 403 if the service is configured read-only.
     """
     with database.session_scope() as uow:
+        candidate = uow.models.get(model_version_id)
+        if candidate is None:
+            msg = f"Model version {model_version_id} does not exist"
+            raise HTTPException(status_code=404, detail=msg)
+        if candidate.mlflow_model_uri is None:
+            msg = (
+                f"Model version {model_version_id} has no logged model and cannot serve predictions"
+            )
+            raise HTTPException(status_code=409, detail=msg)
         try:
             version = uow.models.activate(model_version_id)
         except ValueError as exc:

@@ -159,6 +159,14 @@ class ModelVersionRepository(SqlAlchemyRepository[ModelVersion]):
 
         Raises:
             ValueError: If no such model version exists.
+
+        Note:
+            This does not check ``mlflow_model_uri`` -- the trainer activates its own
+            selected winner through this same method right after training, and that must
+            keep succeeding even when MLflow logging is disabled or degrades non-strictly
+            (see :class:`~f1cp.training.tracking.ExperimentTracker`). The API endpoint that
+            lets an operator activate an arbitrary version is where servability should be
+            checked instead; see :func:`f1cp.api.routers.model.activate`.
         """
         target = self.get(model_version_id)
         if target is None:
