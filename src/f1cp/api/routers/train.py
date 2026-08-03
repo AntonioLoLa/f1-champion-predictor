@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
-from f1cp.api.deps import get_context, get_database
+from f1cp.api.deps import get_context, get_database, require_write_access
 from f1cp.api.schemas.train import TrainRequest, TrainResponse, TrainStatusResponse
 from f1cp.domain.enums import RunStatus
 from f1cp.logging_config import get_logger
@@ -37,7 +37,12 @@ def _run_training(context: AppContext, dataset_version: str | None, run_uuid: st
         logger.exception("Background training run failed", extra={"run_uuid": run_uuid})
 
 
-@router.post("", response_model=TrainResponse, status_code=202)
+@router.post(
+    "",
+    response_model=TrainResponse,
+    status_code=202,
+    dependencies=[Depends(require_write_access)],
+)
 def train(
     payload: TrainRequest,
     background_tasks: BackgroundTasks,

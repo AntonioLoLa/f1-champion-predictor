@@ -150,6 +150,14 @@ def render(client: DashboardApiClient) -> None:
     with st.expander(f"Full training history · {len(full_frame)} versions across every run"):
         data_table(full_frame, model_versions_columns(full_frame), height=360)
 
+    try:
+        read_only = client.health().get("read_only", False)
+    except ApiError:
+        read_only = False
+
+    if read_only:
+        return
+
     section(
         "Change the serving model",
         "Activating a version switches what every prediction in this app -- and every API "

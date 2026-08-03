@@ -243,6 +243,25 @@ class ResultRepository(SqlAlchemyRepository[RaceResult]):
         )
         return self.session.execute(statement).scalars().all()
 
+    def pit_stops_for_race(self, season: int, round_number: int) -> Sequence[PitStop]:
+        """Every pit stop of one Grand Prix, grid order then stop number.
+
+        Args:
+            season: Championship year.
+            round_number: Round within the season.
+
+        Returns:
+            Pit stop rows. Empty for anything before 2011, which the source data simply
+            does not cover, and for rounds not yet run.
+        """
+        statement = (
+            select(PitStop)
+            .join(Race, Race.id == PitStop.race_id)
+            .where(Race.season == season, Race.round == round_number)
+            .order_by(PitStop.driver_id, PitStop.stop)
+        )
+        return self.session.execute(statement).scalars().all()
+
     def winners(self, season: int) -> dict[int, tuple[str, str | None]]:
         """Who won each round of a season.
 

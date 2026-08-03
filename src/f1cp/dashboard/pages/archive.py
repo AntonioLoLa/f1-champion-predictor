@@ -16,6 +16,8 @@ from f1cp.dashboard.components.tables import (
     constructor_standings_columns,
     constructor_standings_frame,
     data_table,
+    pit_stops_columns,
+    pit_stops_frame,
     race_calendar_columns,
     race_calendar_frame,
     race_results_columns,
@@ -149,6 +151,21 @@ def render(client: DashboardApiClient) -> None:
             show_api_error(error)
         else:
             data_table(race_results_frame(results), race_results_columns())
+
+    section(
+        "Pit stops",
+        "Every stop of the race, in order. Pit stop data only exists from 2011 onwards.",
+    )
+    with st.spinner("Loading pit stops..."):
+        try:
+            stops = client.pit_stops(season, labels[chosen])
+        except ApiError as error:
+            show_api_error(error)
+        else:
+            if stops:
+                data_table(pit_stops_frame(stops), pit_stops_columns())
+            else:
+                st.caption("No pit stop data recorded for this round.")
 
     section(
         "Championship standings",

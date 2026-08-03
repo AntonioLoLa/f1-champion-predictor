@@ -120,6 +120,13 @@ class DashboardApiClient:
             "list[dict[str, Any]]", self._get(f"/seasons/{season}/races/{round_number}/results")
         )
 
+    def pit_stops(self, season: int, round_number: int) -> list[dict[str, Any]]:
+        """Fetch ``GET /seasons/{season}/races/{round}/pit-stops``."""
+        return cast(
+            "list[dict[str, Any]]",
+            self._get(f"/seasons/{season}/races/{round_number}/pit-stops"),
+        )
+
     def constructor_standings(
         self, season: int, *, round_number: int | None = None
     ) -> list[dict[str, Any]]:

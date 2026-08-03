@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from f1cp.api.deps import get_database
 from f1cp.api.schemas.archive import (
     ConstructorStandingResponse,
+    PitStopResponse,
     RaceResultResponse,
     RaceSummaryResponse,
     SeasonListResponse,
@@ -149,6 +150,47 @@ def race_results(
                 status=row.status,
                 points=row.points,
                 finished=row.finished,
+            )
+            for row in rows
+        ]
+
+
+@router.get("/seasons/{season}/races/{round}/pit-stops", response_model=list[PitStopResponse])
+def pit_stops(
+    season: int, round: int, database: Database = Depends(get_database)
+) -> list[PitStopResponse]:
+    """Return every pit stop of one Grand Prix.
+
+    Args:
+        season: Championship year.
+        round: Round within the season.
+        database: The shared database handle.
+
+    Returns:
+        Pit stops in driver, then stop-number order. Empty rather than 404 for a race run
+        before 2011 or with no in-race pit stop (rare, but the source data allows it) --
+        only an unrun or unknown round is a 404.
+
+    Raises:
+        HTTPException: 404 if that round has no stored results.
+    """
+    with database.session_scope() as uow:
+        if not uow.results.for_race(season, round):
+            msg = f"No results stored for season {season} round {round}"
+            raise HTTPException(status_code=404, detail=msg)
+
+        rows = uow.results.pit_stops_for_race(season, round)
+        names = {
+            driver.driver_id: driver.full_name
+            for driver in uow.drivers.get_by_ids([row.driver_id for row in rows])
+        }
+        return [
+            PitStopResponse(
+                driver_id=row.driver_id,
+                driver_name=names.get(row.driver_id, row.driver_id),
+                stop=row.stop,
+                lap=row.lap,
+                duration_ms=row.duration_ms,
             )
             for row in rows
         ]

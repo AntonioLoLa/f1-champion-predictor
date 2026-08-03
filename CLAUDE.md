@@ -156,18 +156,20 @@ the same values for Streamlit's own chrome and must be kept in sync by hand.
   That is by design, for audit history — `model_versions` growing is not a bug. Views
   default to the latest `training_run_id`.
 
-## Current state (2026-07-30)
+## Current state (2026-08-03)
 
-- Latest training run is **7** (eight candidates, Platt-calibrated). Its winner on the
-  selection metric is `logistic_regression` (`group_log_loss` 0.6039, `is_best`).
-- **The model actually serving is `catboost` (id 39, 1.1765)** — activated by hand from
-  the dashboard's Model leaderboard, which is a supported action, not a defect: `is_best`
-  (what the run selected) and `is_active` (what the API serves) are deliberately separate.
-  Worth confirming this is intended, because catboost is the second-worst candidate of the
-  run. `POST /model/35/activate` switches to the selected winner.
-- **The repository has no commits.** Everything is untracked on `main`, so there is no
-  rollback point for any of it; making the first commits is the highest-value next action.
-- **`README.md`'s results tables are stale.** They report the pre-Platt-calibration numbers
-  (pooled group log-loss 1.587 and a six-candidate zoo); the zoo now has eight candidates
-  and the metrics changed substantially. Regenerate them from a fresh
-  `scripts/evaluate.py` run before showing the README to anyone.
+- Latest training run is **9** (six candidates: SVM/k-NN are disabled by default, see
+  `conf/models.yaml`). Its winner is `logistic_regression` (`group_log_loss` 0.6149),
+  and this time it wins the one-standard-error tie set outright — LightGBM (0.7073) and
+  Random Forest (0.7303) both fall just outside the threshold (0.7065), unlike the previous
+  run where LightGBM was inside it. `is_best` and `is_active` agree (model version 49).
+- Dataset version `090a2f23eca2-2026-08-03`: 21,072 rows × 72 features (was 73 before
+  `position_order` was dropped — see `docs/AUDIT_v2.md` N8).
+- `docs/AUDIT_v2.md` is a second-round audit (feature engineering, inference/API/dashboard,
+  tests/CI/Docker, modelling) written after `docs/AUDIT.md`'s findings were remediated. Most
+  of its findings (N1, N3, N4, N6, N7, N8, N9) are fixed and regression-tested as of this
+  session; N5 (no auth on `/train`/`/update-data`/`/model/{id}/activate`) was fixed
+  independently via `api.read_only`. Open: N2 (a dedicated `CircuitBlock` test), and R1–R6
+  (documented trade-offs / lower-priority MLOps hardening — no hyperparameter search across
+  the model zoo, in particular, is now called out explicitly in the README's Limitations
+  section rather than left undisclosed).

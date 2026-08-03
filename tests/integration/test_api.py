@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from f1cp.api.main import create_app
+from f1cp.db.models import ModelVersion
 from f1cp.db.session import Database
 from f1cp.domain.enums import RunStatus
 from tests.integration.test_dataset_builder import _seed
@@ -71,6 +72,43 @@ def test_model_endpoints_list_and_activate(settings: Settings, tmp_path: Path) -
 
         missing = client.post("/model/999999/activate")
         assert missing.status_code == 404
+
+
+def test_activating_a_version_with_no_logged_model_is_rejected(
+    settings: Settings, tmp_path: Path
+) -> None:
+    """A candidate whose MLflow logging failed or was skipped must not be activatable.
+
+    Otherwise `/predict` goes dark until someone notices, since there is nothing to load.
+    """
+    fast_settings = _fast_settings(settings, tmp_path)
+    database = Database(fast_settings.database)
+    database.create_all()
+    _seed(database)
+    artifact = _build_dataset(database, fast_settings)
+    active_id = _fit_and_register(fast_settings, database, artifact)
+
+    with database.session_scope() as uow:
+        active = uow.models.get(active_id)
+        broken = ModelVersion(
+            training_run_id=active.training_run_id,
+            name="broken-model",
+            algorithm="logistic_regression",
+            mlflow_model_uri=None,
+            artifact_path="models/broken-model",
+            feature_names=artifact.feature_names,
+        )
+        uow.models.add(broken)
+        uow.session.flush()
+        broken_id = broken.id
+    database.dispose()
+
+    with TestClient(create_app(settings=fast_settings)) as client:
+        response = client.post(f"/model/{broken_id}/activate")
+        assert response.status_code == 409
+
+        # The originally active model is untouched.
+        assert client.get("/model").json()["id"] == active_id
 
 
 def test_predict_and_predict_season_endpoints(settings: Settings, tmp_path: Path) -> None:
@@ -153,3 +191,29 @@ def test_train_endpoint_records_a_failed_run_without_enough_seasons(
     body = status.json()
     assert body["status"] == str(RunStatus.FAILED)
     assert body["error"] is not None
+
+
+def test_read_only_mode_blocks_mutating_endpoints_but_not_reads(
+    settings: Settings, tmp_path: Path
+) -> None:
+    read_only_settings = settings.model_copy(
+        update={"api": settings.api.model_copy(update={"read_only": True})}
+    )
+    client, model_version_id = _client(read_only_settings, tmp_path)
+    with client:
+        health = client.get("/health")
+        assert health.status_code == 200
+        assert health.json()["read_only"] is True
+
+        # Reads stay open -- read-only blocks writes, not the whole API.
+        active = client.get("/model")
+        assert active.status_code == 200
+
+        activated = client.post(f"/model/{model_version_id}/activate")
+        assert activated.status_code == 403
+
+        trained = client.post("/train", json={})
+        assert trained.status_code == 403
+
+        updated = client.post("/update-data", json={})
+        assert updated.status_code == 403

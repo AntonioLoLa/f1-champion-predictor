@@ -120,6 +120,7 @@ ignore = [
 # FastAPI's dependency injection idiom is a function call in an argument default; that is
 # exactly the pattern this rule exists to catch everywhere else.
 "src/f1cp/api/routers/*" = ["B008"]
+"src/f1cp/api/deps.py" = ["B008"]
 "src/f1cp/dashboard/pages/*" = ["D"]
 # Alembic-generated; the shape of these files is not ours to choose.
 "src/f1cp/db/migrations/*" = ["D", "W291", "N999"]
