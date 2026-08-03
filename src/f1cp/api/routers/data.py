@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, BackgroundTasks, Depends
 
-from f1cp.api.deps import get_context
+from f1cp.api.deps import get_context, require_write_access
 from f1cp.api.schemas.data import IngestionReportResponse, UpdateDataRequest, UpdateDataResponse
 from f1cp.domain.enums import RunStatus
 from f1cp.logging_config import get_logger
@@ -59,7 +59,12 @@ def _to_response(report: IngestionReport) -> IngestionReportResponse:
     )
 
 
-@router.post("/update-data", response_model=UpdateDataResponse, status_code=202)
+@router.post(
+    "/update-data",
+    response_model=UpdateDataResponse,
+    status_code=202,
+    dependencies=[Depends(require_write_access)],
+)
 def update_data(
     payload: UpdateDataRequest,
     background_tasks: BackgroundTasks,

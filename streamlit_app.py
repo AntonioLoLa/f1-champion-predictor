@@ -47,6 +47,10 @@ os.environ.setdefault("F1CP_DATA_DIR", str(_DATA_DIR))
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{_DATA_DIR / 'f1cp.db'}")
 os.environ.setdefault("MLFLOW_TRACKING_URI", f"sqlite:///{_DATA_DIR / 'mlflow.db'}")
 os.environ.setdefault("API_BASE_URL", "http://127.0.0.1:8000")
+# There is no login on this public instance, so activating a model, retraining, and
+# re-ingesting data are disabled -- otherwise any visitor could do any of those for every
+# other visitor sharing this one process.
+os.environ.setdefault("API_READ_ONLY", "true")
 
 _API_HOST = "127.0.0.1"
 _API_PORT = 8000

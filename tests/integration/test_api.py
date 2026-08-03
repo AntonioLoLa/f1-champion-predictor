@@ -153,3 +153,29 @@ def test_train_endpoint_records_a_failed_run_without_enough_seasons(
     body = status.json()
     assert body["status"] == str(RunStatus.FAILED)
     assert body["error"] is not None
+
+
+def test_read_only_mode_blocks_mutating_endpoints_but_not_reads(
+    settings: Settings, tmp_path: Path
+) -> None:
+    read_only_settings = settings.model_copy(
+        update={"api": settings.api.model_copy(update={"read_only": True})}
+    )
+    client, model_version_id = _client(read_only_settings, tmp_path)
+    with client:
+        health = client.get("/health")
+        assert health.status_code == 200
+        assert health.json()["read_only"] is True
+
+        # Reads stay open -- read-only blocks writes, not the whole API.
+        active = client.get("/model")
+        assert active.status_code == 200
+
+        activated = client.post(f"/model/{model_version_id}/activate")
+        assert activated.status_code == 403
+
+        trained = client.post("/train", json={})
+        assert trained.status_code == 403
+
+        updated = client.post("/update-data", json={})
+        assert updated.status_code == 403

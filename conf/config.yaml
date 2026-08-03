@@ -44,6 +44,12 @@ api:
   cors_origins:
     - http://localhost:8501
     - http://dashboard:8501
+  # Blocks the three endpoints that mutate shared state (activate, train, update-data)
+  # with a 403. Off by default -- Docker and local runs are unauthenticated by design and
+  # single-user. The unauthenticated public demo (streamlit_app.py) turns this on, since
+  # there any visitor would otherwise be able to retrain or reactivate a model for every
+  # other visitor sharing that one instance.
+  read_only: ${API_READ_ONLY:-false}
 
 dashboard:
   host: ${DASHBOARD_HOST:-0.0.0.0}
