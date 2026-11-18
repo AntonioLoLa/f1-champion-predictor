@@ -227,6 +227,20 @@ def train_run(
     )
 
 
+@train_app.command("due")
+def train_due() -> None:
+    """Print ``true`` if a season has closed since the last successful training run.
+
+    Retraining mid-season fits the same labelled seasons as the previous run, so scheduled
+    automation asks this first (see :mod:`f1cp.training.cadence`). The answer goes to
+    stdout rather than the exit code, so a crash can never read as "not due".
+    """
+    from f1cp.training.cadence import retraining_due
+
+    with AppContext.create(ensure_schema=True) as context, context.database.session_scope() as uow:
+        typer.echo("true" if retraining_due(uow) else "false")
+
+
 @evaluate_app.command("run")
 def evaluate_run(
     model_version_id: Annotated[
