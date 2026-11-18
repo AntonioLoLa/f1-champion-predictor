@@ -5,7 +5,7 @@ PYTHON := .venv/bin/python
 UV     := uv
 
 .PHONY: help setup lint format typecheck test test-unit test-integration test-e2e \
-        data dataset train evaluate api dashboard mlflow pipeline up down logs clean
+        data dataset train evaluate relocate-mlflow api dashboard mlflow pipeline up down logs clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -57,6 +57,9 @@ train: ## Train the model zoo and register the best model
 
 evaluate: ## Evaluate the active model and generate explainability artefacts
 	$(PYTHON) scripts/evaluate.py
+
+relocate-mlflow: ## Repoint data/mlflow.db's artifact paths at this checkout (after pulling the deploy branch)
+	$(PYTHON) -c "from pathlib import Path; from f1cp.training.tracking import relocate_artifact_paths; relocate_artifact_paths(Path('data/mlflow.db'), Path.cwd())"
 
 pipeline: data dataset train evaluate ## Run the whole pipeline end to end
 

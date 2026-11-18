@@ -155,6 +155,14 @@ the same values for Streamlit's own chrome and must be kept in sync by hand.
 - **Each `f1cp train run` appends a fresh candidate per algorithm** rather than overwriting.
   That is by design, for audit history — `model_versions` growing is not a bug. Views
   default to the latest `training_run_id`.
+- **The deploy branch's `data/mlflow.db` holds absolute artifact paths from the machine
+  that trained last** — your laptop, or the GitHub runner once `data-sync.yml` retrains.
+  After pulling `deploy/streamlit-cloud`, run `make relocate-mlflow` before serving or
+  evaluating locally, or the model fails to load.
+- **Jolpica standings list every driver who has scored this season, not only the round's
+  entrants.** A stand-in who scored earlier and sat a round out (Hirakawa, 2026 Brazil) has
+  no `drivers` record in that round's results; `_fetch_standings` emits the drivers it
+  embeds so the identity resolver can still map them.
 
 ## Current state (2026-08-03)
 
