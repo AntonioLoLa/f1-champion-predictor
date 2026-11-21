@@ -185,14 +185,19 @@ class DataIngestor:
         with self._audit(report), provider:
             for season in target_seasons:
                 missing = self._missing_rounds(season)
-                if not missing:
+                if missing is None:
+                    # A season the database has never seen -- every new year, once the
+                    # bootstrap's last season is over. Only a whole-season fetch brings in
+                    # its calendar; until then there is nothing to compare dates against.
+                    logger.info("Fetching a season not yet stored", extra={"season": season})
+                elif not missing:
                     logger.info("Season is already up to date", extra={"season": season})
                     continue
-
-                logger.info(
-                    "Fetching missing rounds",
-                    extra={"season": season, "rounds": missing},
-                )
+                else:
+                    logger.info(
+                        "Fetching missing rounds",
+                        extra={"season": season, "rounds": missing},
+                    )
                 bundle = provider.fetch_season(season, rounds=missing)
                 if bundle.is_empty:
                     continue
@@ -282,17 +287,23 @@ class DataIngestor:
             return pl.DataFrame()
         return pl.concat(frames, how="diagonal_relaxed")
 
-    def _missing_rounds(self, season: int) -> list[int]:
+    def _missing_rounds(self, season: int) -> list[int] | None:
         """Rounds of a season that have taken place but have no stored results.
 
         A round counts as run when its scheduled date is in the past. Comparing against
         the stored calendar avoids an API call just to discover there is nothing to do.
 
+        A season with no stored calendar at all is a different case from one that is up to
+        date, and must not be reported as an empty list: the scheduled data sync runs
+        ``incremental()`` for the current year only, so treating an unknown season as
+        "nothing to do" would leave every season after the bootstrap unfetched, silently.
+
         Args:
             season: Championship year.
 
         Returns:
-            Ascending round numbers still to fetch.
+            Ascending round numbers still to fetch, or ``None`` if the season is not
+            stored and has to be fetched whole.
         """
         today = dt.date.today()
         with self._database.session_scope() as uow:
@@ -300,8 +311,7 @@ class DataIngestor:
             calendar = {race.round: race.date for race in uow.races.list() if race.season == season}
 
         if not calendar:
-            # The season is unknown locally, so the whole calendar has to come from the API.
-            return []
+            return None
 
         return sorted(
             round_number

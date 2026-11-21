@@ -215,7 +215,12 @@ class JolpicaProvider(SeasonProvider):
 
         results, drivers, constructors = self._fetch_results(season, target_rounds)
         qualifying = self._fetch_qualifying(season, target_rounds)
-        driver_standings, constructor_standings = self._fetch_standings(season, target_rounds)
+        (
+            driver_standings,
+            constructor_standings,
+            standings_drivers,
+            standings_constructors,
+        ) = self._fetch_standings(season, target_rounds)
         pit_stops = self._fetch_pit_stops(season, target_rounds)
 
         # Sprints are always fetched for the whole season, even during a partial update:
@@ -234,8 +239,12 @@ class JolpicaProvider(SeasonProvider):
         return DataBundle.from_mapping(
             {
                 TableName.CIRCUITS: self._circuits_frame(race_payloads),
-                TableName.DRIVERS: _drivers_frame(_concat(drivers, sprint_drivers)),
-                TableName.CONSTRUCTORS: _dedupe(_concat(constructors, sprint_constructors)),
+                TableName.DRIVERS: _drivers_frame(
+                    _concat(drivers, sprint_drivers, standings_drivers)
+                ),
+                TableName.CONSTRUCTORS: _dedupe(
+                    _concat(constructors, sprint_constructors, standings_constructors)
+                ),
                 TableName.RACES: races,
                 TableName.RACE_RESULTS: results,
                 TableName.SPRINT_RESULTS: sprints,
@@ -439,14 +448,27 @@ class JolpicaProvider(SeasonProvider):
 
     def _fetch_standings(
         self, season: int, rounds: Sequence[int]
-    ) -> tuple[pl.DataFrame, pl.DataFrame]:
+    ) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame]:
         """Fetch driver and constructor standings after each requested round.
 
         This is the expensive endpoint: standings are only addressable per round, so a full
         season costs two requests per round.
+
+        The standings also return the driver and constructor records they embed. The
+        standings list everyone who has scored this season, not only the entrants of the
+        rounds being fetched. A stand-in who scored earlier in the year and sat out the
+        round being fetched (Ryo Hirakawa at the 2026 Brazilian GP) would otherwise reach
+        the identity resolver with no ``drivers`` row to match on, keep its raw Jolpica id,
+        and fail the foreign key into ``drivers``.
+
+        Returns:
+            Driver standings, constructor standings, and the driver and constructor
+            records embedded in them.
         """
         driver_rows: list[dict[str, Any]] = []
         constructor_rows: list[dict[str, Any]] = []
+        drivers: list[dict[str, Any]] = []
+        constructors_seen: list[dict[str, Any]] = []
         immutable = self._is_immutable(season)
 
         for round_number in rounds:
@@ -458,6 +480,12 @@ class JolpicaProvider(SeasonProvider):
             for standings_list in _standings_lists(payload):
                 for entry in standings_list.get("DriverStandings", []):
                     constructors = entry.get("Constructors") or [{}]
+                    drivers.append(_driver_row(entry.get("Driver", {})))
+                    constructors_seen.extend(
+                        _constructor_row(constructor)
+                        for constructor in constructors
+                        if constructor.get("constructorId")
+                    )
                     driver_rows.append(
                         {
                             "season": season,
@@ -479,6 +507,8 @@ class JolpicaProvider(SeasonProvider):
             )
             for standings_list in _standings_lists(payload):
                 for entry in standings_list.get("ConstructorStandings", []):
+                    if (constructor := entry.get("Constructor", {})).get("constructorId"):
+                        constructors_seen.append(_constructor_row(constructor))
                     constructor_rows.append(
                         {
                             "season": season,
@@ -493,6 +523,8 @@ class JolpicaProvider(SeasonProvider):
         return (
             pl.DataFrame(driver_rows) if driver_rows else pl.DataFrame(),
             pl.DataFrame(constructor_rows) if constructor_rows else pl.DataFrame(),
+            _dedupe(pl.DataFrame(drivers)) if drivers else pl.DataFrame(),
+            _dedupe(pl.DataFrame(constructors_seen)) if constructors_seen else pl.DataFrame(),
         )
 
     def _fetch_pit_stops(self, season: int, rounds: Sequence[int]) -> pl.DataFrame:

@@ -12,12 +12,14 @@ Two things only this entrypoint needs to do, that the Docker deployment does not
 - Point every path-based setting at *this* checkout's ``data/`` directory with an absolute
   path, since Community Cloud's working directory at process start is not guaranteed to be
   the repo root.
-- Rewrite the absolute artifact paths MLflow baked into ``data/mlflow.db`` at training time,
-  on the developer's machine, to wherever this checkout actually landed. Without that,
-  ``mlflow.sklearn.load_model`` looks for model files on a filesystem that doesn't exist
-  here. There is no live MLflow server to reissue those paths from -- the sqlite file
-  bundled into the repo is the only copy -- so it is patched in place, once, before anything
-  reads it.
+- Rewrite the absolute artifact paths MLflow baked into ``data/mlflow.db`` at training time
+  to wherever this checkout actually landed. Without that, ``mlflow.sklearn.load_model``
+  looks for model files on a filesystem that doesn't exist here. There is no live MLflow
+  server to reissue those paths from -- the sqlite file bundled into the repo is the only
+  copy -- so it is patched in place, once, before anything reads it.
+
+  Models are trained on more than one machine, so the prefix to replace is not a
+  constant; :func:`f1cp.training.tracking.relocate_artifact_paths` explains how it copes.
 """
 
 from __future__ import annotations
@@ -25,7 +27,6 @@ from __future__ import annotations
 import os
 import runpy
 import socket
-import sqlite3
 import threading
 import time
 from pathlib import Path
@@ -34,11 +35,6 @@ import streamlit as st
 
 _REPO_ROOT = Path(__file__).resolve().parent
 _DATA_DIR = _REPO_ROOT / "data"
-
-# The absolute prefix every artifact path in data/mlflow.db was recorded with, back when
-# the model zoo was trained on the development machine. Constant, not derived: rewriting
-# depends on knowing what to replace, and that never changes short of retraining.
-_TRAINING_MACHINE_PREFIX = "/home/antonio/projects/f1/champion-predictor"
 
 # conf/config.yaml's defaults are relative (`sqlite:///data/f1cp.db`, `sqlite:///./data/
 # mlflow.db`), which is exactly what Docker Compose overrides via these same variables --
@@ -55,28 +51,12 @@ os.environ.setdefault("API_READ_ONLY", "true")
 _API_HOST = "127.0.0.1"
 _API_PORT = 8000
 
-# (table, column) pairs in data/mlflow.db known to hold an absolute artifact path.
-_ARTIFACT_PATH_COLUMNS = (
-    ("experiments", "artifact_location"),
-    ("runs", "artifact_uri"),
-    ("logged_models", "artifact_location"),
-)
-
 
 def _rewrite_artifact_paths() -> None:
     """Repoint data/mlflow.db's stored artifact paths at this checkout's location."""
-    con = sqlite3.connect(_DATA_DIR / "mlflow.db")
-    try:
-        new_prefix = str(_REPO_ROOT)
-        for table, column in _ARTIFACT_PATH_COLUMNS:
-            con.execute(
-                f"UPDATE {table} SET {column} = REPLACE({column}, ?, ?) "  # noqa: S608
-                f"WHERE {column} LIKE ?",
-                (_TRAINING_MACHINE_PREFIX, new_prefix, f"{_TRAINING_MACHINE_PREFIX}%"),
-            )
-        con.commit()
-    finally:
-        con.close()
+    from f1cp.training.tracking import relocate_artifact_paths
+
+    relocate_artifact_paths(_DATA_DIR / "mlflow.db", _REPO_ROOT)
 
 
 def _start_api() -> None:

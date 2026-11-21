@@ -8,6 +8,7 @@ it is the one seam training tests replace with a no-op.
 
 from __future__ import annotations
 
+import sqlite3
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -15,12 +16,13 @@ from f1cp.logging_config import get_logger
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
     from sklearn.pipeline import Pipeline
 
     from f1cp.config.settings import MLflowConfig
 
-__all__ = ["ExperimentTracker"]
+__all__ = ["ExperimentTracker", "relocate_artifact_paths"]
 
 logger = get_logger(__name__)
 
@@ -171,3 +173,47 @@ class ExperimentTracker:
             if self._config.strict:
                 raise
             return None
+
+
+# (table, column) pairs in a sqlite MLflow store known to hold an absolute artifact path.
+_ARTIFACT_PATH_COLUMNS = (
+    ("experiments", "artifact_location"),
+    ("runs", "artifact_uri"),
+    ("logged_models", "artifact_location"),
+    ("model_versions", "storage_location"),
+)
+_MLRUNS_SEGMENT = "/mlruns/"
+
+
+def relocate_artifact_paths(tracking_db: Path, checkout_root: Path) -> None:
+    """Repoint a sqlite MLflow store's absolute artifact paths at another checkout.
+
+    A direct sqlite tracking store records every artifact location as an absolute path on
+    the machine that trained. Shipping that store to another machine -- Streamlit Community
+    Cloud, or the GitHub Actions runner that retrains when a season closes -- leaves
+    ``mlflow.sklearn.load_model`` looking for files on a filesystem that is not there.
+
+    Models are trained on more than one machine, so the old prefix is not a constant. Every
+    artifact path does share one shape, ``<checkout>/mlruns/...``, so the rewrite keeps
+    everything from the ``/mlruns/`` segment on and replaces whatever precedes it, path or
+    ``file://`` URI alike. Rows already under ``checkout_root`` are left alone, which makes
+    the rewrite idempotent.
+
+    Args:
+        tracking_db: The sqlite file backing the MLflow store.
+        checkout_root: Directory that now holds ``mlruns/``.
+    """
+    new_prefix = str(checkout_root)
+    con = sqlite3.connect(tracking_db)
+    try:
+        for table, column in _ARTIFACT_PATH_COLUMNS:
+            con.execute(
+                f"UPDATE {table} "  # noqa: S608 -- identifiers are module constants
+                f"SET {column} = ? || substr({column}, instr({column}, ?)) "
+                f"WHERE instr({column}, ?) > 0 "
+                f"AND substr({column}, 1, instr({column}, ?) - 1) != ?",
+                (new_prefix, _MLRUNS_SEGMENT, _MLRUNS_SEGMENT, _MLRUNS_SEGMENT, new_prefix),
+            )
+        con.commit()
+    finally:
+        con.close()

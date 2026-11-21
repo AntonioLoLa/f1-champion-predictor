@@ -1,7 +1,7 @@
 # F1 Championship Predictor
 
 [![CI](https://github.com/AntonioLoLa/f1-champion-predictor/actions/workflows/ci.yml/badge.svg)](https://github.com/AntonioLoLa/f1-champion-predictor/actions/workflows/ci.yml)
-[![Nightly data update](https://github.com/AntonioLoLa/f1-champion-predictor/actions/workflows/nightly-update.yml/badge.svg)](https://github.com/AntonioLoLa/f1-champion-predictor/actions/workflows/nightly-update.yml)
+[![Data sync](https://github.com/AntonioLoLa/f1-champion-predictor/actions/workflows/data-sync.yml/badge.svg)](https://github.com/AntonioLoLa/f1-champion-predictor/actions/workflows/data-sync.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](pyproject.toml)
 
@@ -252,10 +252,12 @@ make lint           # ruff + black --check + mypy --strict
 
 CI (`.github/workflows/ci.yml`) runs lint and test on every push/PR, then builds the real
 Docker images and brings up the full stack, waiting on each service's own healthcheck
-before asserting success. `nightly-update.yml` bootstraps or incrementally updates the
-data, rebuilds the dataset, retrains and re-evaluates on a daily schedule, persisting
-`data/` across runs via `actions/cache` (GitHub-hosted runners have no other durable
-storage between scheduled invocations).
+before asserting success. `data-sync.yml` keeps the public Streamlit Community Cloud
+deployment current: twice a week it checks out `deploy/streamlit-cloud`, ingests any new
+rounds, and commits the refreshed database back to that branch, which redeploys the app.
+It retrains only once a season has closed (`f1cp train due`): a season in progress has no
+champion yet and is excluded from training, so a mid-season retrain would refit identical
+data -- see `f1cp/training/cadence.py`.
 
 ## Project layout
 
@@ -278,6 +280,15 @@ src/f1cp/
 ```
 
 ## Known operational notes
+
+- **The deploy branch's MLflow store carries absolute paths from whoever trained last.**
+  `deploy/streamlit-cloud` tracks `data/f1cp.db`, `data/mlflow.db` and `mlruns/`, and once
+  `data-sync.yml` retrains after a season closes, the new models in `data/mlflow.db` point
+  at `/home/runner/work/...`. Streamlit Cloud rewrites them at startup and CI does too
+  before training, but a local checkout of that branch does not: serving or evaluating
+  locally fails to load the model until the paths are repointed at your checkout, with
+  `make relocate-mlflow` (idempotent, safe to rerun after every pull). See
+  `f1cp.training.tracking.relocate_artifact_paths`.
 
 - SHAP/PNG export (`kaleido`) needs a working headless Chrome (`plotly_get_chrome`); if it
   isn't available, PNG export is skipped with a logged warning and the interactive JSON
