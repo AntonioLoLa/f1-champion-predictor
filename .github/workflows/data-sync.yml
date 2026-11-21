@@ -123,7 +123,11 @@ jobs:
           git add -f data/f1cp.db data/mlflow.db
           if [ "${{ steps.changes.outputs.retrain }}" = "true" ]; then
             git add -f mlruns/
-            message="chore(data): sync rounds and retrain after a season closed"
+            if [ "${{ inputs.force_retrain }}" = "true" ]; then
+              message="chore(model): retrain on demand"
+            else
+              message="chore(data): sync rounds and retrain after a season closed"
+            fi
           else
             message="chore(data): sync new rounds"
           fi

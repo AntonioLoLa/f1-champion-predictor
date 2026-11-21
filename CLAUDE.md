@@ -158,26 +158,44 @@ the same values for Streamlit's own chrome and must be kept in sync by hand.
 - **The deploy branch's `data/mlflow.db` holds absolute artifact paths from the machine
   that trained last** — your laptop, or the GitHub runner once `data-sync.yml` retrains.
   After pulling `deploy/streamlit-cloud`, run `make relocate-mlflow` before serving or
-  evaluating locally, or the model fails to load.
+  evaluating locally, or the model fails to load. That rewrite (and the API caching
+  predictions) dirties the tracked `data/*.db`; `git restore data/` before the next pull,
+  or the bot's next sync commit will not fast-forward.
 - **Jolpica standings list every driver who has scored this season, not only the round's
   entrants.** A stand-in who scored earlier and sat a round out (Hirakawa, 2026 Brazil) has
   no `drivers` record in that round's results; `_fetch_standings` emits the drivers it
   embeds so the identity resolver can still map them.
 
-## Current state (2026-08-03)
+## Current state (2026-11-21)
 
-- Latest training run is **9** (six candidates: SVM/k-NN are disabled by default, see
-  `conf/models.yaml`). Its winner is `logistic_regression` (`group_log_loss` 0.6149),
-  and this time it wins the one-standard-error tie set outright — LightGBM (0.7073) and
-  Random Forest (0.7303) both fall just outside the threshold (0.7065), unlike the previous
-  run where LightGBM was inside it. `is_best` and `is_active` agree (model version 49).
-- Dataset version `090a2f23eca2-2026-08-03`: 21,072 rows × 72 features (was 73 before
-  `position_order` was dropped — see `docs/AUDIT_v2.md` N8).
-- `docs/AUDIT_v2.md` is a second-round audit (feature engineering, inference/API/dashboard,
-  tests/CI/Docker, modelling) written after `docs/AUDIT.md`'s findings were remediated. Most
-  of its findings (N1, N3, N4, N6, N7, N8, N9) are fixed and regression-tested as of this
-  session; N5 (no auth on `/train`/`/update-data`/`/model/{id}/activate`) was fixed
-  independently via `api.read_only`. Open: N2 (a dedicated `CircuitBlock` test), and R1–R6
-  (documented trade-offs / lower-priority MLOps hardening — no hyperparameter search across
-  the model zoo, in particular, is now called out explicitly in the README's Limitations
-  section rather than left undisclosed).
+- **The deployed app updates itself.** `.github/workflows/data-sync.yml` (on `main`, runs
+  Mon/Wed 08:00 UTC) checks out `deploy/streamlit-cloud`, runs `f1cp data update`, and
+  commits `data/f1cp.db` back when the race data changed; Streamlit Community Cloud
+  redeploys on that push. It retrains only when `f1cp train due` says a season has closed
+  since the last successful run (`training/cadence.py`), then also commits `data/mlflow.db`
+  and `mlruns/`. Manual dispatch takes `force_retrain` and `dry_run`. It replaced
+  `nightly-update.yml`, which retrained into an `actions/cache` nothing served and had been
+  disabled for inactivity since 2026-10-03.
+- **Verified end to end on GitHub:** a `dry_run` rehearsal, then a real `force_retrain`
+  run (44892747926) that retrained, committed as `github-actions[bot]` (149e119) and
+  pushed to the deploy branch. The model it published loads and serves locally after
+  `make relocate-mlflow`. The first automatic round sync should be Monday 2026-11-23,
+  after Las Vegas. The first automatic retrain is due after Abu Dhabi (2026-12-06).
+  Whether the keepalive step really resets GitHub's 60-day inactivity timer is unconfirmed
+  until the off-season has passed.
+- **Data:** the deploy branch holds results through **2026 R20, Brazilian GP**. Jolpica has
+  not published 2027 yet; the sync fetches it whole once it does (`_missing_rounds`
+  returns `None` for an unknown season).
+- **Served model:** training run **9** (2026-11-21, on the CI runner), dataset
+  `090a2f23eca2-2026-11-21` (21,282 rows × 72 features). Active model version **49**,
+  `logistic_regression` (`group_log_loss` 0.6225). The one-standard-error tie set is
+  {logistic_regression, lightgbm} (threshold 0.7206). It is the first deployed model with
+  the N1 (`momentum`) and N8 (`position_order` dropped) fixes. Until this run the app
+  served run 8 / model 43 from 2026-08-02. An earlier laptop "run 9" with those fixes was
+  never committed to the deploy branch and is gone, so ids from before today in old notes
+  don't match. `train due` only reacts to a season closing, not to feature-code changes:
+  **after changing features, retrain by hand** (dispatch Data sync with `force_retrain`).
+- `docs/AUDIT_v2.md`: N1, N3–N9 fixed. N5 was fixed via `api.read_only`. The infra finding
+  that "nightly-update.yml updates a deployment nobody serves" is resolved by `data-sync.yml`.
+  Still open: N2 (a dedicated `CircuitBlock` test) and R1–R6. No hyperparameter search
+  across the model zoo, in particular; the README's Limitations section says so.
