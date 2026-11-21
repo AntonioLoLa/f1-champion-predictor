@@ -27,6 +27,10 @@ on:
         description: "Retrain even if no season has closed since the last run"
         type: boolean
         default: false
+      dry_run:
+        description: "Run every step but do not commit or push (to rehearse a retrain)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write # push the refreshed databases to the deploy branch
@@ -109,7 +113,9 @@ jobs:
           .venv/bin/f1cp evaluate run
 
       - name: Commit and push to the deploy branch
-        if: steps.changes.outputs.new_data == 'true' || steps.changes.outputs.retrain == 'true'
+        if: >-
+          !inputs.dry_run &&
+          (steps.changes.outputs.new_data == 'true' || steps.changes.outputs.retrain == 'true')
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
