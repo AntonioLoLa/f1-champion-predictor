@@ -1,0 +1,23 @@
+artifact_path: /home/antonio/projects/f1/champion-predictor/mlruns/1/models/m-dc97f42963e94eb4a79a4c4aeafb02df/artifacts
+flavors:
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.sklearn
+    model_path: model.pkl
+    predict_fn: predict
+    python_version: 3.12.13
+  sklearn:
+    code: null
+    pickled_model: model.pkl
+    serialization_format: cloudpickle
+    sklearn_version: 1.9.0
+    skops_trusted_types: null
+mlflow_version: 3.14.0
+model_id: m-dc97f42963e94eb4a79a4c4aeafb02df
+model_size_bytes: 2274
+model_uuid: m-dc97f42963e94eb4a79a4c4aeafb02df
+prompts: null
+run_id: 6e5167b842b5472cbc95023e6501a2ed
+utc_time_created: '2026-07-30 17:43:31.798705'
