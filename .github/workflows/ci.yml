@@ -82,7 +82,7 @@ jobs:
   # `docker compose up` actually produces a working, healthy deployment, not just a set of
   # Dockerfiles that happen to parse. Does not exercise the `pipeline` profile: that needs
   # live internet access to the Jolpica/f1db providers, which a PR-blocking job should never
-  # depend on for reliability (see `nightly-update.yml` for that path instead).
+  # depend on for reliability (see `data-sync.yml` for that path instead).
   docker-smoke:
     runs-on: ubuntu-latest
     needs: [lint, test]

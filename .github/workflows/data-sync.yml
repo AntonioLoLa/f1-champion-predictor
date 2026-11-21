@@ -1,0 +1,141 @@
+name: Data sync
+
+# Keeps the public Streamlit Community Cloud deployment current. That deployment serves
+# whatever `data/f1cp.db`, `data/mlflow.db` and `mlruns/` are committed on the
+# `deploy/streamlit-cloud` branch, and redeploys on every push to it -- so updating the
+# deployment means committing to that branch, nothing else. (The workflow it replaces
+# retrained into an `actions/cache` entry that nothing ever served; docs/AUDIT_v2.md.)
+#
+# Two cadences, because new data and new labels arrive at very different rates:
+#
+# - New rounds: every run. Inference rebuilds features from the live database, so ingesting
+#   a round is enough to move the served probabilities -- no retrain needed.
+# - Retraining: only once a season closes (`f1cp train due`). Until its final round a
+#   season has no champion and is excluded from training (training/splitters.py), so a
+#   mid-season retrain would refit identical data. See f1cp/training/cadence.py.
+#
+# The schedule only fires from the default branch, so this file must live on `main`; it
+# checks out and pushes to the deploy branch explicitly.
+on:
+  schedule:
+    # Monday, after the race weekend, with a Wednesday catch-up in case Jolpica published
+    # late. Las Vegas finishes on Sunday morning UTC, so Monday covers every round.
+    - cron: "0 8 * * 1,3"
+  workflow_dispatch:
+    inputs:
+      force_retrain:
+        description: "Retrain even if no season has closed since the last run"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Run every step but do not commit or push (to rehearse a retrain)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # push the refreshed databases to the deploy branch
+  actions: write # re-enable this workflow, see the last step
+
+concurrency:
+  group: data-sync
+  cancel-in-progress: false
+
+env:
+  DEPLOY_BRANCH: deploy/streamlit-cloud
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_BRANCH }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Cache uv downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('requirements.lock') }}
+          restore-keys: uv-${{ runner.os }}-
+
+      - name: Set up the project
+        run: make setup
+
+      - name: Point the MLflow store at this checkout
+        # Artifact paths were recorded on whichever machine trained; see
+        # f1cp.training.tracking.relocate_artifact_paths.
+        run: |
+          .venv/bin/python -c "
+          from pathlib import Path
+          from f1cp.training.tracking import relocate_artifact_paths
+          relocate_artifact_paths(Path('data/mlflow.db'), Path.cwd())
+          "
+
+      - name: Fingerprint the race data before updating
+        id: before
+        run: echo "fingerprint=$(python3 .github/scripts/race_data_fingerprint.py data/f1cp.db)" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch new rounds
+        run: .venv/bin/f1cp data update
+
+      - name: Decide what changed
+        id: changes
+        run: |
+          after=$(python3 .github/scripts/race_data_fingerprint.py data/f1cp.db)
+          if [ "$after" != "${{ steps.before.outputs.fingerprint }}" ]; then
+            echo "new_data=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "new_data=false" >> "$GITHUB_OUTPUT"
+          fi
+          # stdout carries only the answer; logs go to stderr.
+          due=$(.venv/bin/f1cp train due)
+          if [ "$due" = "true" ] || [ "${{ inputs.force_retrain }}" = "true" ]; then
+            echo "retrain=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "retrain=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Retrain (a season has closed)
+        if: steps.changes.outputs.retrain == 'true'
+        run: |
+          .venv/bin/f1cp dataset build
+          .venv/bin/f1cp train run
+          .venv/bin/f1cp evaluate run
+
+      - name: Commit and push to the deploy branch
+        if: >-
+          !inputs.dry_run &&
+          (steps.changes.outputs.new_data == 'true' || steps.changes.outputs.retrain == 'true')
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # data/ and mlruns/ are gitignored on main; the deploy branch tracks them on purpose.
+          git add -f data/f1cp.db data/mlflow.db
+          if [ "${{ steps.changes.outputs.retrain }}" = "true" ]; then
+            git add -f mlruns/
+            message="chore(data): sync rounds and retrain after a season closed"
+          else
+            message="chore(data): sync new rounds"
+          fi
+          latest=$(python3 .github/scripts/race_data_fingerprint.py data/f1cp.db --latest)
+          git commit -m "$message" -m "Latest round with results: $latest"
+          git push origin "HEAD:${DEPLOY_BRANCH}"
+
+      - name: Keep the schedule alive
+        # GitHub disables scheduled workflows after 60 days without repository activity --
+        # which is how the previous nightly job silently stopped on 2026-10-03. Off-season
+        # (December to March) has no commits at all, so re-enable explicitly every run.
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/data-sync.yml/enable"
