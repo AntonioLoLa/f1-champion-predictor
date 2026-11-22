@@ -121,7 +121,11 @@ test de regresión análogo al de `season_points_rate`. Requiere reconstruir el 
 
 ---
 
-### N2 — La cobertura de test que reclama `docs/ROADMAP.md` (punto 9) es solo parcialmente cierta
+### N2 — La cobertura de test que reclama `docs/ROADMAP.md` (punto 9) es solo parcialmente cierta [FIXED 2026-11-22]
+
+`tests/unit/features/test_circuit.py` compara `CircuitBlock` con una referencia fila a fila y fija un valor
+calculado a mano. Con el join roto reintroducido, sus tres tests fallan (el de leakage sigue pasando,
+como se midió abajo).
 
 `docs/ROADMAP.md` afirma que ampliar `synthetic.py` (debutante a mitad de temporada, ausencia, circuito
 repetido) "habría cazado E1 y E5". Verificado empíricamente reintroduciendo el join roto original de
@@ -397,7 +401,7 @@ el resto de candidatos activos.
 **Cómo arreglarlo:** medirlo y aceptarlo explícitamente (como se hizo con SVM/k-NN), o reducir
 `background_samples` específicamente para MLP.
 
-### R5 — `CalibrationConfig.method` por defecto en código es `"isotonic"`
+### R5 — `CalibrationConfig.method` por defecto en código es `"isotonic"` [FIXED 2026-11-22]
 
 `src/f1cp/config/settings.py:370-374` — exactamente el método que el propio proyecto documenta como
 peligroso en este dataset (isotonic sobre 3 etiquetas independientes reproduce un 100% de probabilidad de
@@ -406,7 +410,7 @@ título). Hoy enmascarado porque `conf/models.yaml` siempre lo fija a `sigmoid` 
 **Gravedad: Baja-Media** (footgun de configuración, no un bug activo).
 **Cómo arreglarlo:** cambiar el default de la clase Pydantic a `"sigmoid"`.
 
-### R6 — `pyproject.toml` declara `scikit-learn>=1.5`, el código necesita `>=1.6`
+### R6 — `pyproject.toml` declara `scikit-learn>=1.5`, el código necesita `>=1.6` [FIXED 2026-11-22]
 
 `models/calibration.py:15` importa `sklearn.frozen.FrozenEstimator`, que no existe antes de 1.6.
 `requirements.lock` fija 1.9.0, así que hoy no explota, pero el contrato declarado del paquete es
