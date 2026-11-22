@@ -80,6 +80,8 @@ def test_season_races_returns_the_full_calendar_including_unrun_rounds(client) -
     # as "no winner" rather than promoting whoever finished best.
     assert races[2]["winner_id"] == "d2"
     assert races[2]["winner_name"]
+    assert races[2]["winner_constructor_name"]
+    assert races[1]["winner_constructor_name"] is None
     assert races[1]["winner_id"] is None
 
 
@@ -88,6 +90,7 @@ def test_race_results_are_classified_winner_first(client) -> None:
 
     assert results
     assert results[0]["position"] == 1
+    assert all(row["constructor_name"] for row in results)
     positions = [row["position_order"] for row in results]
     assert positions == sorted(positions)
 
@@ -147,3 +150,56 @@ def test_archive_works_without_any_trained_model(client) -> None:
         "/seasons/2020/constructor-standings",
     ):
         assert client.get(path).status_code == 200, path
+
+
+def _stand_in(database: Database, *, driver_id: str, team: str, rounds: range) -> None:
+    """Move a driver to another team for some rounds, reported as Jolpica reports it.
+
+    The race results carry the team per round. The standings, as Jolpica sends them, list
+    every team the driver has raced for that season in order of first appearance, and
+    ingestion stores the last of them -- so from the first stand-in round on, every
+    standing names the stand-in team, even after the driver has gone back.
+    """
+    from sqlalchemy import update
+
+    from f1cp.db.models import DriverStanding, RaceResult
+
+    with database.session_scope() as uow:
+        race_ids = uow.races.id_map([2020])
+        uow.session.execute(
+            update(RaceResult)
+            .where(
+                RaceResult.driver_id == driver_id,
+                RaceResult.race_id.in_([race_ids[(2020, r)] for r in rounds]),
+            )
+            .values(constructor_id=team)
+        )
+        later = [race_ids[(2020, r)] for r in ROUNDS if r >= rounds.start]
+        uow.session.execute(
+            update(DriverStanding)
+            .where(DriverStanding.driver_id == driver_id, DriverStanding.race_id.in_(later))
+            .values(constructor_id=team)
+        )
+
+
+def _team_after(client, driver_id: str, round_number: int) -> str | None:
+    standings = client.get(f"/seasons/2020/standings?round={round_number}").json()["standings"]
+    return next(row["constructor_name"] for row in standings if row["driver_id"] == driver_id)
+
+
+def test_a_driver_who_returns_to_their_team_is_shown_with_it(
+    settings: Settings, tmp_path: Path
+) -> None:
+    # Liam Lawson in 2026: RB, three rounds at Red Bull, then back to RB -- and shown as
+    # Red Bull for the rest of the season, because that was the last team Jolpica added.
+    fast_settings = _fast_settings(settings, tmp_path)
+    database = Database(fast_settings.database)
+    database.create_all()
+    _seed(database)
+    _stand_in(database, driver_id="d1", team="beta", rounds=range(2, 4))
+    database.dispose()
+
+    with TestClient(create_app(settings=fast_settings)) as client:
+        assert _team_after(client, "d1", 1) == "Alpha Racing"
+        assert _team_after(client, "d1", 3) == "Beta Motorsport"
+        assert _team_after(client, "d1", ROUNDS[-1]) == "Alpha Racing"

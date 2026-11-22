@@ -118,6 +118,10 @@ independently deployable. `components/palette.py` holds design tokens;
 primitives (`page_header`, `section`, `stat_grid`, `leaderboard`, `card`). Pages compose
 those; they do not write their own CSS or colour literals. `.streamlit/config.toml` mirrors
 the same values for Streamlit's own chrome and must be kept in sync by hand.
+`components/labels.py` turns API keys (team slugs, model and metric names, feature columns)
+into reader-facing words and formats probabilities; pages never print a raw key. A new
+feature needs a label there, or `test_every_feature_the_model_reads_has_a_readable_label`
+fails.
 
 ## Conventions
 

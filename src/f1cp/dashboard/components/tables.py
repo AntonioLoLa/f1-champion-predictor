@@ -17,7 +17,17 @@ from typing import TYPE_CHECKING, Any
 import pandas as pd
 import streamlit as st
 
+from f1cp.dashboard.components.labels import (
+    metric_help,
+    metric_label,
+    metric_order,
+    model_label,
+    team_name,
+)
+
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from streamlit.elements.lib.column_types import ColumnConfig
 
 __all__ = [
@@ -45,7 +55,7 @@ _METRIC_FORMAT = "%.4f"
 
 def data_table(
     frame: pd.DataFrame,
-    columns: dict[str, ColumnConfig] | None = None,
+    columns: Mapping[str, ColumnConfig | None] | None = None,
     *,
     height: int | None = None,
 ) -> None:
@@ -53,7 +63,8 @@ def data_table(
 
     Args:
         frame: The data to show.
-        columns: Per-column formatting, from the matching ``*_columns`` builder.
+        columns: Per-column formatting, from the matching ``*_columns`` builder. A
+            ``None`` value hides that column.
         height: Fixed pixel height. Set it where a table is long enough to scroll inside
             its own panel rather than pushing the rest of the page down.
     """
@@ -68,26 +79,48 @@ def data_table(
     )
 
 
-def prediction_rows_frame(drivers: list[dict[str, Any]]) -> pd.DataFrame:
+def _with_team(rows: list[dict[str, Any]], *, prefix: str = "") -> pd.DataFrame:
+    """``rows`` as a frame with a ``team`` column holding each row's team display name.
+
+    Resolved from the API rows before they become a frame, so every table names the team
+    the same way -- see :func:`~f1cp.dashboard.components.labels.team_name`.
+    """
+    return pd.DataFrame([{**row, "team": team_name(row, prefix=prefix)} for row in rows])
+
+
+def prediction_rows_frame(
+    drivers: list[dict[str, Any]], *, diagnostics: bool = False
+) -> pd.DataFrame:
     """One row per driver's ranked prediction, ready for display.
 
     Args:
         drivers: The ``drivers`` list from a ``RoundPredictionsResponse``.
+        diagnostics: Also include the model's probability before calibration and before
+            rescaling across the field. Those are for checking the model, not for reading
+            the title race, so the default table leaves them out.
 
     Returns:
         A frame ordered by rank with human-readable column names.
     """
-    frame = pd.DataFrame(drivers).sort_values("rank")
-    return frame.rename(
+    frame = _with_team(drivers).sort_values("rank")
+    frame = frame.assign(
+        standing_position=frame["standing_position"].astype("Int64"),
+    ).rename(
         columns={
             "rank": "Rank",
             "driver_name": "Driver",
-            "constructor_id": "Team",
+            "team": "Team",
+            "standing_position": "Standing",
+            "points": "Points",
             "probability": "Title chance",
             "probability_calibrated": "Calibrated",
             "probability_raw": "Raw",
         }
-    )[["Rank", "Driver", "Team", "Title chance", "Calibrated", "Raw"]]
+    )
+    columns = ["Rank", "Driver", "Team", "Standing", "Points", "Title chance"]
+    if diagnostics:
+        columns += ["Calibrated", "Raw"]
+    return frame[columns]
 
 
 def prediction_columns() -> dict[str, ColumnConfig]:
@@ -98,9 +131,22 @@ def prediction_columns() -> dict[str, ColumnConfig]:
     behind it stay as plain percentages -- they are for checking, not scanning.
     """
     return {
-        "Rank": st.column_config.NumberColumn("#", width="small", format="%d"),
+        "Rank": st.column_config.NumberColumn(
+            "#",
+            width="small",
+            format="%d",
+            help="Order by title chance. Drivers with equal odds are listed in "
+            "championship order.",
+        ),
         "Driver": st.column_config.TextColumn("Driver", width="medium"),
         "Team": st.column_config.TextColumn("Team", width="medium"),
+        "Standing": st.column_config.NumberColumn(
+            "Pos",
+            width="small",
+            format="P%d",
+            help="Position in the drivers' championship after this round.",
+        ),
+        "Points": st.column_config.NumberColumn("Points", format="%.0f"),
         "Title chance": st.column_config.ProgressColumn(
             "Title chance",
             help="Probability of winning the championship, rescaled to sum to 100% "
@@ -110,13 +156,15 @@ def prediction_columns() -> dict[str, ColumnConfig]:
             max_value=1.0,
         ),
         "Calibrated": st.column_config.NumberColumn(
-            "Calibrated",
-            help="Model probability after calibration, before rescaling across the field.",
+            "Before rescaling",
+            help="The model's probability for this driver alone, before the field is "
+            "rescaled to share 100% between them.",
             format="percent",
         ),
         "Raw": st.column_config.NumberColumn(
-            "Raw",
-            help="Model output before calibration.",
+            "Uncalibrated",
+            help="The model's direct output, before it is adjusted to match how often "
+            "similar odds came true in past seasons.",
             format="percent",
         ),
     }
@@ -131,12 +179,12 @@ def standings_frame(standings: list[dict[str, Any]]) -> pd.DataFrame:
     Returns:
         A frame ordered by position with human-readable column names.
     """
-    frame = pd.DataFrame(standings).sort_values("position")
+    frame = _with_team(standings).sort_values("position")
     return frame.rename(
         columns={
             "position": "Pos",
             "driver_name": "Driver",
-            "constructor_id": "Team",
+            "team": "Team",
             "points": "Points",
             "wins": "Wins",
         }
@@ -164,8 +212,11 @@ def contention_frame(contenders: list[dict[str, Any]]) -> pd.DataFrame:
         A frame ordered by current points with human-readable column names. Both status
         columns stay boolean (not text) so they render as native checkbox columns.
     """
-    frame = pd.DataFrame(contenders).sort_values("current_points", ascending=False)
+    frame = pd.DataFrame(contenders).sort_values(
+        ["current_points", "driver_name"], ascending=[False, True]
+    )
     frame = frame.assign(
+        behind=frame["current_points"].max() - frame["current_points"],
         eliminated_by=frame.apply(
             lambda row: "-" if row["still_alive"] else (row["eliminated_by_name"] or "-"),
             axis=1,
@@ -175,6 +226,7 @@ def contention_frame(contenders: list[dict[str, Any]]) -> pd.DataFrame:
         columns={
             "driver_name": "Driver",
             "current_points": "Points",
+            "behind": "Behind leader",
             "best_case_points": "Maximum possible",
             "still_alive": "In contention",
             "controls_own_destiny": "Needs no help",
@@ -184,6 +236,7 @@ def contention_frame(contenders: list[dict[str, Any]]) -> pd.DataFrame:
         [
             "Driver",
             "Points",
+            "Behind leader",
             "Maximum possible",
             "In contention",
             "Needs no help",
@@ -201,19 +254,23 @@ def contention_columns() -> dict[str, ColumnConfig]:
     return {
         "Driver": st.column_config.TextColumn("Driver", width="medium"),
         "Points": st.column_config.NumberColumn("Points", format="%.0f"),
+        "Behind leader": st.column_config.NumberColumn(
+            "Behind leader", help="Points behind the championship leader.", format="%.0f"
+        ),
         "Maximum possible": st.column_config.NumberColumn(
-            "Ceiling",
-            help="Points this driver would hold after winning everything still available.",
+            "Max possible",
+            help="Points this driver would hold after winning every race and sprint still "
+            "to come.",
             format="%.0f",
         ),
         "In contention": st.column_config.CheckboxColumn(
-            "Alive",
+            "Can still win",
             help="Some sequence of remaining results still leaves this driver champion. "
-            "Only false once a rival's current points already beat this driver's ceiling.",
+            "Only false once a rival already has more points than this driver can still reach.",
             disabled=True,
         ),
         "Needs no help": st.column_config.CheckboxColumn(
-            "Self-sufficient",
+            "In own hands",
             help="Winning every remaining round would be enough on its own, even if the "
             "nearest rival finished second in all of them. False here means still alive, "
             "but now needing a rival to drop points.",
@@ -233,10 +290,10 @@ def race_calendar_frame(races: list[dict[str, Any]]) -> pd.DataFrame:
         A frame in calendar order. Rounds not yet run keep their row, with a dash where
         the winner will go -- the calendar is the point, not just the results so far.
     """
-    frame = pd.DataFrame(races).sort_values("round")
+    frame = _with_team(races, prefix="winner_").sort_values("round")
     frame = frame.assign(
         winner_name=frame["winner_name"].fillna("-"),
-        winner_constructor_id=frame["winner_constructor_id"].fillna("-"),
+        team=frame["team"].fillna("-"),
         date=pd.to_datetime(frame["date"], errors="coerce"),
     )
     return frame.rename(
@@ -247,7 +304,7 @@ def race_calendar_frame(races: list[dict[str, Any]]) -> pd.DataFrame:
             "country": "Country",
             "has_sprint": "Sprint",
             "winner_name": "Winner",
-            "winner_constructor_id": "Team",
+            "team": "Team",
         }
     )[["Rd", "Grand Prix", "Date", "Country", "Sprint", "Winner", "Team"]]
 
@@ -275,7 +332,7 @@ def race_results_frame(results: list[dict[str, Any]]) -> pd.DataFrame:
         A frame in classified order. Drivers who did not finish show their status ("Retired",
         "+1 Lap") in place of a position, which is how a classification is actually read.
     """
-    frame = pd.DataFrame(results).sort_values("position_order")
+    frame = _with_team(results).sort_values("position_order")
     return frame.assign(
         position=frame["position"].astype("Int64"),
         grid=frame["grid"].astype("Int64"),
@@ -284,7 +341,7 @@ def race_results_frame(results: list[dict[str, Any]]) -> pd.DataFrame:
         columns={
             "position": "Pos",
             "driver_name": "Driver",
-            "constructor_id": "Team",
+            "team": "Team",
             "grid": "Grid",
             "laps": "Laps",
             "status": "Status",
@@ -396,6 +453,7 @@ def model_versions_frame(versions: list[dict[str, Any]]) -> pd.DataFrame:
                 "is_active",
                 "is_best",
                 "created_at",
+                "model",
             ]
         )
 
@@ -409,40 +467,59 @@ def model_versions_frame(versions: list[dict[str, Any]]) -> pd.DataFrame:
             "is_active": version["is_active"],
             "is_best": version["is_best"],
             "created_at": version["created_at"],
+            "model": model_label(version["name"]),
         }
         row.update(version.get("metrics") or {})
         rows.append(row)
     frame = pd.DataFrame(rows).sort_values("id", ascending=False)
+    # Columns in reading order: which model, whether it serves, then its scores with the
+    # one it was selected on first; bookkeeping last.
+    leading = ["model", "is_active", "is_best"]
+    trailing = ["created_at", "id", "training_run_id", "name", "algorithm"]
+    metrics = metric_order([c for c in frame.columns if c not in {*leading, *trailing}])
+    frame = frame[[*leading, *metrics, *trailing]]
     # Parsed rather than left as an ISO string so the column sorts chronologically and
     # renders in the reader's own format instead of showing a timezone suffix.
     return frame.assign(created_at=pd.to_datetime(frame["created_at"], format="ISO8601"))
 
 
-def model_versions_columns(frame: pd.DataFrame) -> dict[str, ColumnConfig]:
+def model_versions_columns(
+    frame: pd.DataFrame, *, show_ids: bool = False
+) -> dict[str, ColumnConfig | None]:
     """Formatting for :func:`model_versions_frame`.
 
     Metric columns vary with what the training run logged, so they are configured from
     the frame itself rather than hard-coded: any column that is not known metadata is a
-    metric and gets the shared numeric format.
+    metric and gets the shared numeric format, with its plain-language name and an
+    explanation of which direction is better.
 
     Args:
         frame: The frame about to be rendered.
+        show_ids: Show the version and training-run ids. Useful in the full training
+            history, where they are what tells otherwise identical rows apart; noise
+            everywhere else.
 
     Returns:
-        A column configuration covering both the metadata and the metric columns.
+        A column configuration covering both the metadata and the metric columns. A
+        ``None`` entry hides that column.
     """
-    metadata: dict[str, ColumnConfig] = {
-        "id": st.column_config.NumberColumn("ID", width="small", format="%d"),
+    ids: dict[str, ColumnConfig | None] = {
+        "id": st.column_config.NumberColumn("Version", width="small", format="%d"),
         "training_run_id": st.column_config.NumberColumn("Run", width="small", format="%d"),
-        "name": st.column_config.TextColumn("Model", width="medium"),
-        "algorithm": st.column_config.TextColumn("Algorithm", width="medium"),
+    }
+    metadata: dict[str, ColumnConfig | None] = {
+        **(ids if show_ids else dict.fromkeys(ids)),
+        # The internal key; the readable `model` column below is what is shown.
+        "name": None,
+        "algorithm": None,
+        "model": st.column_config.TextColumn("Model", width="medium"),
         "is_active": st.column_config.CheckboxColumn("Live", disabled=True),
         "is_best": st.column_config.CheckboxColumn("Best of run", disabled=True),
         "created_at": st.column_config.DatetimeColumn("Trained", format="YYYY-MM-DD HH:mm"),
     }
-    metrics: dict[str, ColumnConfig] = {
+    metrics: dict[str, ColumnConfig | None] = {
         column: st.column_config.NumberColumn(
-            column.replace("_", " ").capitalize(), format=_METRIC_FORMAT
+            metric_label(column), help=metric_help(column), format=_METRIC_FORMAT
         )
         for column in frame.columns
         if column not in metadata

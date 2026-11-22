@@ -89,6 +89,7 @@ def season_races(season: int, database: Database = Depends(get_database)) -> Sea
             for driver in uow.drivers.get_by_ids([winner for winner, _ in winners.values()])
         }
         circuits = {circuit.circuit_id: circuit for circuit in uow.circuits.list()}
+        teams = {team.constructor_id: team.name for team in uow.constructors.list()}
 
         races = []
         for race in calendar:
@@ -106,6 +107,7 @@ def season_races(season: int, database: Database = Depends(get_database)) -> Sea
                     winner_id=winner[0] if winner else None,
                     winner_name=driver_names.get(winner[0]) if winner else None,
                     winner_constructor_id=winner[1] if winner else None,
+                    winner_constructor_name=teams.get(winner[1]) if winner and winner[1] else None,
                 )
             )
         return SeasonRacesResponse(season=season, races=races)
@@ -138,6 +140,7 @@ def race_results(
             driver.driver_id: driver.full_name
             for driver in uow.drivers.get_by_ids([row.driver_id for row in rows])
         }
+        teams = {team.constructor_id: team.name for team in uow.constructors.list()}
         return [
             RaceResultResponse(
                 position=row.position,
@@ -145,6 +148,7 @@ def race_results(
                 driver_id=row.driver_id,
                 driver_name=names.get(row.driver_id, row.driver_id),
                 constructor_id=row.constructor_id,
+                constructor_name=teams.get(row.constructor_id) if row.constructor_id else None,
                 grid=row.grid,
                 laps=row.laps,
                 status=row.status,

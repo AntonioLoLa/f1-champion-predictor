@@ -8,6 +8,7 @@ import streamlit as st
 
 from f1cp.dashboard.api_client import ApiError
 from f1cp.dashboard.components.charts import metric_comparison_chart
+from f1cp.dashboard.components.labels import metric_help, metric_label, model_label
 from f1cp.dashboard.components.layout import show_api_error
 from f1cp.dashboard.components.tables import (
     data_table,
@@ -34,7 +35,12 @@ _METADATA_COLUMNS = {
     "is_active",
     "is_best",
     "created_at",
+    "model",
 }
+
+# The metric the training pipeline selects on (`conf/models.yaml`), so the page opens on
+# the comparison that actually decided which model serves.
+_PRIMARY_METRIC = "group_log_loss"
 
 # Metrics where a smaller number is a better model. Anything else (a hit rate, an
 # accuracy) reads the other way, and the winning bar has to follow.
@@ -82,6 +88,8 @@ def render(client: DashboardApiClient) -> None:
     # expander below instead.
     latest_run_id = int(full_frame["training_run_id"].max())
     frame = full_frame[full_frame["training_run_id"] == latest_run_id]
+    if _PRIMARY_METRIC in frame.columns:
+        frame = frame.sort_values(_PRIMARY_METRIC, na_position="last")
 
     live = next((version for version in versions if version["is_active"]), None)
     best = frame[frame["is_best"]]
@@ -90,7 +98,7 @@ def render(client: DashboardApiClient) -> None:
         "Model leaderboard",
         _SUBTITLE,
         meta=[
-            (f"Run #{latest_run_id}", "accent"),
+            (f"Training run {latest_run_id}", "accent"),
             (f"{len(frame)} candidates", ""),
         ],
     )
@@ -99,13 +107,13 @@ def render(client: DashboardApiClient) -> None:
         [
             Stat(
                 label="Serving now",
-                value=live["name"] if live else "None",
-                detail=live["algorithm"] if live else "No model activated",
+                value=model_label(live["name"]) if live else "None",
+                detail="scores every prediction in this app" if live else "No model activated",
                 tone="accent",
             ),
             Stat(
                 label="Best of this run",
-                value=str(best.iloc[0]["name"]) if len(best) else "-",
+                value=model_label(str(best.iloc[0]["name"])) if len(best) else "-",
                 detail="selected by the training pipeline",
             ),
             Stat(
@@ -127,9 +135,13 @@ def render(client: DashboardApiClient) -> None:
         metric = st.selectbox(
             "Metric",
             metric_columns,
-            index=0,
+            index=metric_columns.index(_PRIMARY_METRIC) if _PRIMARY_METRIC in metric_columns else 0,
+            format_func=metric_label,
             help="Lower is better for losses and errors; higher is better for hit rates.",
         )
+        explanation = metric_help(metric)
+        if explanation:
+            st.caption(explanation)
         comparable = frame.dropna(subset=[metric])
         if len(comparable):
             with card():
@@ -137,18 +149,22 @@ def render(client: DashboardApiClient) -> None:
                     metric_comparison_chart(
                         comparable,
                         metric_col=metric,
-                        category_col="name",
+                        category_col="model",
                         lower_is_better=_lower_is_better(metric),
                     ),
                     width="stretch",
                     config={"displayModeBar": False},
                 )
 
-    section("Every candidate in this run", "Sort by any metric to rank them yourself.")
+    section(
+        "Every candidate in this run",
+        "Best first by log loss. Hover a column header for what it measures, or sort by "
+        "any of them.",
+    )
     data_table(frame, model_versions_columns(frame))
 
     with st.expander(f"Full training history · {len(full_frame)} versions across every run"):
-        data_table(full_frame, model_versions_columns(full_frame), height=360)
+        data_table(full_frame, model_versions_columns(full_frame, show_ids=True), height=360)
 
     try:
         read_only = client.health().get("read_only", False)
@@ -165,7 +181,7 @@ def render(client: DashboardApiClient) -> None:
     )
     visible_ids = set(frame["id"])
     labels = {
-        f"{version['name']}{' · live' if version['is_active'] else ''}": version["id"]
+        f"{model_label(version['name'])}{' · live' if version['is_active'] else ''}": version["id"]
         for version in versions
         if version["id"] in visible_ids
     }

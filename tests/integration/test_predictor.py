@@ -157,6 +157,47 @@ def test_predict_round_returns_ranked_normalised_probabilities(
     database.dispose()
 
 
+def test_predictions_carry_team_names_and_the_standing_they_tie_break_on(
+    settings: Settings, tmp_path: Path
+) -> None:
+    fast_settings, database, model_version_id = _prepare(settings, tmp_path)
+    service = PredictionService(fast_settings)
+
+    with database.session_scope() as uow:
+        result = service.predict_round(uow, season=2020, round_number=4)
+        standings = {row.driver_id: row for row in uow.standings.for_round(2020, 4)}
+        persisted = uow.predictions.for_round(2020, 4, model_version_id=model_version_id)
+
+    for driver in result.drivers:
+        assert driver.constructor_name in {"Alpha Racing", "Beta Motorsport"}
+        assert driver.points == pytest.approx(standings[driver.driver_id].points)
+        assert driver.standing_position == standings[driver.driver_id].position
+
+    # What is stored for traceability is the ranking that was served, ties and all.
+    assert {row.driver_id: row.rank for row in persisted} == {
+        driver.driver_id: driver.rank for driver in result.drivers
+    }
+    database.dispose()
+
+
+def test_title_contention_counts_the_rounds_still_to_run(
+    settings: Settings, tmp_path: Path
+) -> None:
+    fast_settings = _fast_settings(settings, tmp_path)
+    database = Database(fast_settings.database)
+    database.create_all()
+    _seed(database)
+    service = PredictionService(fast_settings)
+
+    with database.session_scope() as uow:
+        mid_season = service.title_contention(uow, season=2020, round_number=2)
+        final = service.title_contention(uow, season=2020, round_number=ROUNDS[-1])
+
+    assert mid_season.rounds_remaining == len(ROUNDS) - 2
+    assert final.rounds_remaining == 0
+    database.dispose()
+
+
 def test_predict_round_defaults_to_the_latest_result(settings: Settings, tmp_path: Path) -> None:
     fast_settings, database, _model_version_id = _prepare(settings, tmp_path)
     service = PredictionService(fast_settings)

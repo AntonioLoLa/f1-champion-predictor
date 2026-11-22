@@ -24,7 +24,14 @@ import streamlit as st
 if TYPE_CHECKING:
     from f1cp.dashboard.api_client import DashboardApiClient
 
-__all__ = ["TTL_SECONDS", "cached_explain", "cached_predict", "cached_predict_season"]
+__all__ = [
+    "TTL_SECONDS",
+    "cached_explain",
+    "cached_predict",
+    "cached_predict_season",
+    "cached_season_races",
+    "cached_seasons",
+]
 
 TTL_SECONDS = 60
 
@@ -72,3 +79,15 @@ def cached_explain(
 ) -> dict[str, Any]:
     """Cached wrapper around :meth:`DashboardApiClient.explain`."""
     return _client.explain(season, round_number, model_version_id=model_version_id)
+
+
+@st.cache_data(ttl=TTL_SECONDS, show_spinner=False)
+def cached_seasons(_client: DashboardApiClient) -> list[dict[str, Any]]:
+    """Cached ``/seasons`` list: every sidebar's season picker reads it on every rerun."""
+    return list(_client.seasons()["seasons"])
+
+
+@st.cache_data(ttl=TTL_SECONDS, show_spinner=False)
+def cached_season_races(_client: DashboardApiClient, season: int) -> list[dict[str, Any]]:
+    """Cached season calendar, which the round picker labels its options from."""
+    return list(_client.season_races(season)["races"])

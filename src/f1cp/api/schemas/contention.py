@@ -25,4 +25,5 @@ class TitleContentionResponse(BaseModel):
 
     season: int
     round: int
+    rounds_remaining: int
     contenders: list[DriverContentionResponse]
