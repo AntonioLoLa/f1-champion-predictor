@@ -13,6 +13,7 @@ class DriverStandingResponse(BaseModel):
     driver_id: str
     driver_name: str
     constructor_id: str | None
+    constructor_name: str | None
     points: float
     position: int | None
     wins: int

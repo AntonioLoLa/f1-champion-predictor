@@ -50,6 +50,7 @@ def standings(
             msg = f"No standings for season {season} round {resolved_round}"
             raise HTTPException(status_code=404, detail=msg)
 
+        teams = {team.constructor_id: team.name for team in uow.constructors.list()}
         drivers = {
             driver.driver_id: driver
             for driver in uow.drivers.get_by_ids([row.driver_id for row in rows])
@@ -66,6 +67,7 @@ def standings(
                         else row.driver_id
                     ),
                     constructor_id=row.constructor_id,
+                    constructor_name=teams.get(row.constructor_id) if row.constructor_id else None,
                     points=row.points,
                     position=row.position,
                     wins=row.wins,

@@ -80,6 +80,8 @@ def test_season_races_returns_the_full_calendar_including_unrun_rounds(client) -
     # as "no winner" rather than promoting whoever finished best.
     assert races[2]["winner_id"] == "d2"
     assert races[2]["winner_name"]
+    assert races[2]["winner_constructor_name"]
+    assert races[1]["winner_constructor_name"] is None
     assert races[1]["winner_id"] is None
 
 
@@ -88,6 +90,7 @@ def test_race_results_are_classified_winner_first(client) -> None:
 
     assert results
     assert results[0]["position"] == 1
+    assert all(row["constructor_name"] for row in results)
     positions = [row["position_order"] for row in results]
     assert positions == sorted(positions)
 
