@@ -31,6 +31,8 @@ from f1cp.logging_config import get_logger
 from f1cp.models.normalizer import normalize_round_probabilities
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from sklearn.pipeline import Pipeline
 
     from f1cp.config.settings import Settings
@@ -43,6 +45,7 @@ __all__ = [
     "PredictionService",
     "RoundPredictions",
     "TitleContentionResult",
+    "rank_within_rounds",
 ]
 
 logger = get_logger(__name__)
@@ -63,6 +66,11 @@ _PROBABILITY_COLUMN = "probability"
 _RAW_COLUMN = "probability_raw"
 _NORMALIZED_COLUMN = f"{_PROBABILITY_COLUMN}_normalized"
 _RANK_COLUMN = "rank"
+# Standings columns the panel carries for the round itself (``features/standings.py``).
+# Both are the championship as it stood *after* the round being scored, which is the
+# moment a prediction speaks for, so reading them here is not leakage.
+_POSITION_COLUMN = "championship_position"
+_POINTS_COLUMN = "current_points"
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,15 +81,24 @@ class DriverPrediction:
         driver_id: The driver's identifier.
         driver_name: Display name, resolved from the drivers table.
         constructor_id: The team the driver was racing for at this round.
+        constructor_name: That team's display name, or ``None`` when it is unknown.
+        points: Championship points after this round.
+        standing_position: Championship position after this round, or ``None`` for a
+            driver with no classified standing.
         probability: Calibrated probability, rescaled to sum to 1 within the round.
         probability_calibrated: Calibrated probability before rescaling.
         probability_raw: Pre-calibration model output.
-        rank: 1-based rank within the round, best-placed first.
+        rank: 1-based rank within the round, best-placed first. Exact ties in
+            ``probability`` resolve by championship standing (see
+            :func:`rank_within_rounds`).
     """
 
     driver_id: str
     driver_name: str
     constructor_id: str | None
+    constructor_name: str | None
+    points: float
+    standing_position: int | None
     probability: float
     probability_calibrated: float
     probability_raw: float
@@ -140,11 +157,13 @@ class TitleContentionResult:
     Attributes:
         season: Championship year.
         round: Round within the season this was computed after.
+        rounds_remaining: Rounds of the season still to run after ``round``.
         contenders: One entry per driver with a standing, ranked by current points.
     """
 
     season: int
     round: int
+    rounds_remaining: int
     contenders: list[TitleContention]
 
 
@@ -395,7 +414,10 @@ class PredictionService:
             remaining_rounds=[race.has_sprint for race in remaining],
         )
         return TitleContentionResult(
-            season=resolved_season, round=resolved_round, contenders=contenders
+            season=resolved_season,
+            round=resolved_round,
+            rounds_remaining=len(remaining),
+            contenders=contenders,
         )
 
     def _engineered_frame(self, uow: UnitOfWork, *, max_season: int) -> pl.DataFrame:
@@ -427,7 +449,12 @@ class PredictionService:
             "driver_id",
             (pl.col("given_name") + pl.lit(" ") + pl.col("family_name")).alias("driver_name"),
         )
+        teams = sources.constructors.select(
+            "constructor_id", pl.col("name").alias("constructor_name")
+        )
         panel = frame.join(names, on="driver_id", how="left")
+        if "constructor_id" in panel.columns:
+            panel = panel.join(teams, on="constructor_id", how="left")
 
         if self._panel_cache_size > 0:
             with self._panel_cache_lock:
@@ -471,13 +498,7 @@ class PredictionService:
             group_columns=group_columns,
             enabled=self._settings.training.normalisation.enabled,
         )
-        return normalized.with_columns(
-            pl.col(_NORMALIZED_COLUMN)
-            .rank(method="ordinal", descending=True)
-            .over(group_columns)
-            .cast(pl.Int64)
-            .alias(_RANK_COLUMN)
-        )
+        return rank_within_rounds(normalized, group_columns=group_columns)
 
     def _load_pipeline(self, uri: str) -> Pipeline:
         """Load (and cache) a pipeline logged to MLflow."""
@@ -516,6 +537,46 @@ class PredictionService:
             ).to_dicts()
         ]
         uow.predictions.upsert_many(rows)
+
+
+def rank_within_rounds(frame: pl.DataFrame, *, group_columns: Sequence[str]) -> pl.DataFrame:
+    """Rank drivers within each round by rescaled probability, breaking exact ties.
+
+    A plain ordinal rank resolves ties by row order, which is alphabetical by driver id.
+    That is not a harmless detail: once a title is mathematically decided, every
+    eliminated driver is zeroed before the rescale, so the whole field ties at exactly 0
+    and "second favourite" became whoever sorts first -- after the 2026 Brazilian GP that
+    was Alexander Albon rather than Max Verstappen, second in the standings. Where the
+    model genuinely has no preference, the championship table is the only ordering a
+    reader would accept, so ties fall back to it: better position first, a driver with no
+    position last, then the name, so the result never depends on row order at all.
+
+    Only *exact* ties are broken. A model that puts one driver a hair ahead of another
+    keeps that order even when the standings disagree -- that difference is the model's
+    opinion, and overriding it would misreport what was served.
+
+    Args:
+        frame: Scored rows carrying the rescaled probability column.
+        group_columns: Columns identifying one round, e.g. ``("season", "round")``.
+
+    Returns:
+        ``frame`` sorted by round and rank, with an integer ``rank`` column added.
+    """
+    groups = list(group_columns)
+    keys: list[str] = [_NORMALIZED_COLUMN]
+    descending = [True]
+    for column in (_POSITION_COLUMN, "driver_name", "driver_id"):
+        if column in frame.columns:
+            keys.append(column)
+            descending.append(False)
+    ordered = frame.sort(
+        [*groups, *keys],
+        descending=[False] * len(groups) + descending,
+        nulls_last=True,
+    )
+    return ordered.with_columns(
+        pl.int_range(1, pl.len() + 1, dtype=pl.Int64).over(groups).alias(_RANK_COLUMN)
+    )
 
 
 def _feature_names(model_version: ModelVersion, frame: pl.DataFrame) -> list[str]:
@@ -612,6 +673,11 @@ def _to_round_predictions(
             driver_id=row["driver_id"],
             driver_name=row["driver_name"] or row["driver_id"],
             constructor_id=row.get("constructor_id"),
+            constructor_name=row.get("constructor_name"),
+            points=float(row.get(_POINTS_COLUMN) or 0.0),
+            standing_position=(
+                int(row[_POSITION_COLUMN]) if row.get(_POSITION_COLUMN) is not None else None
+            ),
             probability=row[_NORMALIZED_COLUMN],
             probability_calibrated=row[_PROBABILITY_COLUMN],
             probability_raw=row[_RAW_COLUMN],
