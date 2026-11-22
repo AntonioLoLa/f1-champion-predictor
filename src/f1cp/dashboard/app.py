@@ -108,7 +108,7 @@ def main() -> None:
                 ),
                 st.Page(
                     lambda: feature_importance.render(client),
-                    title="Feature attribution",
+                    title="What drives the odds",
                     icon=":material/insights:",
                     url_path="feature-importance",
                 ),
