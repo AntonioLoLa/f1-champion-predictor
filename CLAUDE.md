@@ -197,5 +197,7 @@ the same values for Streamlit's own chrome and must be kept in sync by hand.
   **after changing features, retrain by hand** (dispatch Data sync with `force_retrain`).
 - `docs/AUDIT_v2.md`: N1, N3–N9 fixed. N5 was fixed via `api.read_only`. The infra finding
   that "nightly-update.yml updates a deployment nobody serves" is resolved by `data-sync.yml`.
-  Still open: N2 (a dedicated `CircuitBlock` test) and R1–R6. No hyperparameter search
-  across the model zoo, in particular; the README's Limitations section says so.
+  N2 (`CircuitBlock` test), R5 (calibration default) and R6 (scikit-learn pin) were fixed
+  on 2026-11-22. Still open: R1–R4, which are documented trade-offs. That includes no
+  hyperparameter search across the model zoo; the README's Limitations section says so.
+  `tests/e2e/` is still empty although the `e2e` marker is advertised.
