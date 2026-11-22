@@ -423,9 +423,9 @@ incorrecto para cualquiera que instale desde `pyproject.toml` sin el lock.
 
 ## Riesgos de infraestructura / MLOps (no re-priorizados aquí, ya detallados en la auditoría de esta sesión)
 
-- `tests/e2e/` vacío pese a documentarse como categoría activa; `pytest -m e2e` sale con éxito sobre 0
+- [FIXED 2026-11-22: `tests/e2e/test_pipeline.py`] `tests/e2e/` vacío pese a documentarse como categoría activa; `pytest -m e2e` sale con éxito sobre 0
   tests recolectados — falsa sensación de cobertura.
-- `nightly-update.yml` reentrena dentro de una caché de GitHub Actions efímera, sin ninguna conexión con
+- [FIXED 2026-11-21: sustituido por `data-sync.yml`] `nightly-update.yml` reentrena dentro de una caché de GitHub Actions efímera, sin ninguna conexión con
   el stack de Docker Compose ni con el entrypoint de Streamlit Cloud — el "despliegue" que actualiza no
   es el que sirve a nadie.
 - Sin gate de cobertura (`fail_under`) en ningún sitio; `dashboard/*` y `migrations/*` excluidos del

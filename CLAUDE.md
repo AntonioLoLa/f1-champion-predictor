@@ -200,4 +200,5 @@ the same values for Streamlit's own chrome and must be kept in sync by hand.
   N2 (`CircuitBlock` test), R5 (calibration default) and R6 (scikit-learn pin) were fixed
   on 2026-11-22. Still open: R1–R4, which are documented trade-offs. That includes no
   hyperparameter search across the model zoo; the README's Limitations section says so.
-  `tests/e2e/` is still empty although the `e2e` marker is advertised.
+  `tests/e2e/test_pipeline.py` covers provider → ingest → dataset → train → serve → next
+  round, over a synthetic eight-season championship (about 25 s; part of `make test`).
