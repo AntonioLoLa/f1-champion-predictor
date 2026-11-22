@@ -243,6 +243,42 @@ class ResultRepository(SqlAlchemyRepository[RaceResult]):
         )
         return self.session.execute(statement).scalars().all()
 
+    def latest_teams(self, season: int, *, through_round: int) -> dict[str, str]:
+        """Each driver's team in their most recent Grand Prix up to a round.
+
+        This is the source of truth for "who does this driver race for", not the standings:
+        Jolpica's standings list every team a driver has raced for that season, in order of
+        first appearance, so a driver who returns to an earlier team keeps the other one
+        (see ``JolpicaProvider._fetch_standings``). A driver who misses a
+        round keeps the team of the last race they did start, the same rule the feature
+        panel applies.
+
+        Args:
+            season: Championship year.
+            through_round: Last round to consider, inclusive.
+
+        Returns:
+            ``{driver_id: constructor_id}`` for every driver with a race result in the
+            season up to that round. In a shared drive (two cars in one race, a 1950s
+            practice) the better-classified entry wins.
+        """
+        statement = (
+            select(RaceResult.driver_id, RaceResult.constructor_id)
+            .join(Race, Race.id == RaceResult.race_id)
+            .where(
+                Race.season == season,
+                Race.round <= through_round,
+                RaceResult.constructor_id.is_not(None),
+            )
+            # Later rows overwrite earlier ones below, so the last row per driver is their
+            # latest round and, within it, their best-classified car.
+            .order_by(Race.round, RaceResult.position_order.desc())
+        )
+        teams: dict[str, str] = {}
+        for driver_id, constructor_id in self.session.execute(statement):
+            teams[driver_id] = constructor_id
+        return teams
+
     def pit_stops_for_race(self, season: int, round_number: int) -> Sequence[PitStop]:
         """Every pit stop of one Grand Prix, grid order then stop number.
 

@@ -491,8 +491,15 @@ class JolpicaProvider(SeasonProvider):
                             "season": season,
                             "round": round_number,
                             "driver_id": entry.get("Driver", {}).get("driverId"),
-                            # A driver can change team mid-season; the last entry is the
-                            # team they were driving for at this round.
+                            # Not reliably the team the driver races for at this round.
+                            # `Constructors` lists every team the driver has raced for this
+                            # season, in order of first appearance -- so Liam Lawson, who
+                            # stood in at Red Bull for three rounds of 2026 and then went
+                            # back to RB, reads `[rb, red_bull]` for the rest of the year.
+                            # The last entry is only the most recently *added* team. Kept
+                            # as the provider reports it; anything shown to a reader takes
+                            # the team from the race results instead
+                            # (`ResultRepository.latest_teams`).
                             "constructor_id": constructors[-1].get("constructorId"),
                             "points": _to_float(entry.get("points")),
                             "position": _to_int(entry.get("position")),
