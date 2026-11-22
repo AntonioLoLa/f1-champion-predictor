@@ -65,6 +65,7 @@ def title_contention(
     return TitleContentionResponse(
         season=result.season,
         round=result.round,
+        rounds_remaining=result.rounds_remaining,
         contenders=[
             DriverContentionResponse(
                 driver_id=contender.driver_id,

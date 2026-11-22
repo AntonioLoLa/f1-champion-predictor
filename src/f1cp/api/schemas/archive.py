@@ -50,6 +50,7 @@ class RaceSummaryResponse(BaseModel):
     winner_id: str | None
     winner_name: str | None
     winner_constructor_id: str | None
+    winner_constructor_name: str | None
 
 
 class SeasonRacesResponse(BaseModel):
@@ -67,6 +68,7 @@ class RaceResultResponse(BaseModel):
     driver_id: str
     driver_name: str
     constructor_id: str | None
+    constructor_name: str | None
     grid: int | None
     laps: int | None
     status: str | None

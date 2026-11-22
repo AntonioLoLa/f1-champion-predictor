@@ -12,6 +12,7 @@ from __future__ import annotations
 import pandas as pd
 import plotly.graph_objects as go
 
+from f1cp.dashboard.components.labels import percent
 from f1cp.dashboard.components.palette import (
     ACCENT,
     FONT_STACK,
@@ -120,7 +121,7 @@ def probability_bar_chart(
             orientation="h",
             marker={"color": colors, "line": {"width": 0}},
             width=0.62,
-            text=[f"{value:.1%}" for value in ordered[value_col]],
+            text=[percent(value) for value in ordered[value_col]],
             textposition="outside",
             textfont={"family": FONT_STACK, "size": 12, "color": INK_SECONDARY},
             cliponaxis=False,
@@ -145,7 +146,8 @@ def feature_importance_chart(
     """A ranked horizontal bar chart of mean |SHAP value| per feature.
 
     Args:
-        feature_names: Feature names, most important first.
+        feature_names: Feature labels to show, most important first. Callers pass the
+            readable labels, not column names.
         importances: Mean absolute SHAP value per feature, same order.
         top_n: How many of the leading features to plot.
 
@@ -166,7 +168,7 @@ def feature_importance_chart(
             orientation="h",
             marker={"color": colors, "line": {"width": 0}},
             width=0.6,
-            hovertemplate="<b>%{y}</b><br>mean |SHAP| %{x:.4f}<extra></extra>",
+            hovertemplate="<b>%{y}</b><br>average influence %{x:.4f}<extra></extra>",
         )
     )
     figure.update_layout(
@@ -174,7 +176,7 @@ def feature_importance_chart(
             xaxis={
                 **_VALUE_AXIS,
                 "title": {
-                    "text": "Mean absolute SHAP value",
+                    "text": "Average influence on the prediction",
                     "font": {"family": FONT_STACK, "size": 11, "color": INK_MUTED},
                 },
                 "rangemode": "tozero",

@@ -25,6 +25,9 @@ class DriverPredictionResponse(BaseModel):
     driver_id: str
     driver_name: str
     constructor_id: str | None
+    constructor_name: str | None
+    points: float
+    standing_position: int | None
     probability: float
     probability_calibrated: float
     probability_raw: float

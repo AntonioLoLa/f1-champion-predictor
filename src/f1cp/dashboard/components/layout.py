@@ -13,6 +13,9 @@ from typing import TYPE_CHECKING
 
 import streamlit as st
 
+from f1cp.dashboard.api_client import ApiError
+from f1cp.dashboard.cache import cached_season_races, cached_seasons
+from f1cp.dashboard.components.labels import model_label
 from f1cp.dashboard.components.theme import inject_theme
 
 if TYPE_CHECKING:
@@ -20,6 +23,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "control_panel",
+    "in_sample_notice",
     "model_version_selector",
     "season_round_inputs",
     "season_selector",
@@ -44,16 +48,25 @@ def control_panel(title: str = "Filters") -> None:
     )
 
 
-def season_selector(key_prefix: str, *, label: str = "Season") -> int:
-    """Render a season picker.
+def _completed_seasons(client: DashboardApiClient) -> dict[int, int] | None:
+    """``{season: rounds completed}`` for every season with results, newest first.
 
-    Args:
-        key_prefix: Prefix for the widget key.
-        label: The control's label.
-
-    Returns:
-        The chosen season.
+    ``None`` when the season list cannot be fetched, so callers can fall back to a plain
+    year input rather than leaving the page without a control.
     """
+    try:
+        catalogue = cached_seasons(client)
+    except ApiError:
+        return None
+    return {
+        int(row["season"]): int(row["rounds_completed"])
+        for row in catalogue
+        if row["rounds_completed"]
+    }
+
+
+def _year_input(label: str, key: str) -> int:
+    """The fallback season control, for when the season list is unavailable."""
     return int(
         st.number_input(
             label,
@@ -61,21 +74,50 @@ def season_selector(key_prefix: str, *, label: str = "Season") -> int:
             max_value=dt.date.today().year + 1,
             value=dt.date.today().year,
             step=1,
+            key=key,
+        )
+    )
+
+
+def season_selector(client: DashboardApiClient, key_prefix: str, *, label: str = "Season") -> int:
+    """Render a season picker offering only seasons that have results.
+
+    A free year input let the reader ask for a season that was never ingested and get an
+    error for it; listing what exists, newest first, removes that dead end.
+
+    Args:
+        client: The API client.
+        key_prefix: Prefix for the widget key.
+        label: The control's label.
+
+    Returns:
+        The chosen season.
+    """
+    seasons = _completed_seasons(client)
+    if not seasons:
+        return _year_input(label, f"{key_prefix}_season_only")
+    return int(
+        st.selectbox(
+            label,
+            list(seasons),
             key=f"{key_prefix}_season_only",
+            help="Every season with results in the database, newest first.",
         )
     )
 
 
 def season_round_inputs(
-    key_prefix: str, *, default_season: int | None = None
+    client: DashboardApiClient, key_prefix: str
 ) -> tuple[int | None, int | None]:
-    """Render a "latest round" toggle plus season/round inputs.
+    """Render a "latest round" toggle plus season and Grand Prix pickers.
+
+    Rounds are offered by name ("R20 · São Paulo Grand Prix") and only up to the last one
+    with results -- a reader knows which race they mean, not which number it was.
 
     Args:
+        client: The API client.
         key_prefix: Prefix for Streamlit widget keys, so the same widgets can appear on
             more than one page in a single run without key collisions.
-        default_season: Season to prefill the number input with when the user switches off
-            "latest round". Falls back to the current year.
 
     Returns:
         ``(season, round)``, both ``None`` when the toggle is on -- the API resolves that
@@ -85,18 +127,30 @@ def season_round_inputs(
     if use_latest:
         return None, None
 
-    season = st.number_input(
-        "Season",
-        min_value=1950,
-        max_value=dt.date.today().year + 1,
-        value=default_season or dt.date.today().year,
-        step=1,
-        key=f"{key_prefix}_season",
+    season = season_selector(client, key_prefix)
+    seasons = _completed_seasons(client) or {}
+    completed = seasons.get(season, 0)
+    try:
+        calendar = cached_season_races(client, season)
+    except ApiError:
+        calendar = []
+    names = {int(race["round"]): str(race["name"]) for race in calendar}
+    rounds = list(range(1, completed + 1)) if completed else sorted(names)
+    if not rounds:
+        rounds = [1]
+
+    round_number = st.selectbox(
+        "Grand Prix",
+        rounds,
+        index=len(rounds) - 1,
+        format_func=lambda number: f"R{number} · {names.get(number, 'Round ' + str(number))}",
+        # Keyed per season: with one shared key, a round chosen in one season stays
+        # selected after switching to another that also has it, so switching seasons
+        # would land on an arbitrary race instead of the latest one.
+        key=f"{key_prefix}_round_{season}",
+        help="Odds as they stood after this race.",
     )
-    round_number = st.number_input(
-        "Round", min_value=1, max_value=40, value=1, step=1, key=f"{key_prefix}_round"
-    )
-    return int(season), int(round_number)
+    return season, int(round_number)
 
 
 def model_version_selector(client: DashboardApiClient, key_prefix: str) -> int | None:
@@ -122,10 +176,10 @@ def model_version_selector(client: DashboardApiClient, key_prefix: str) -> int |
     latest_versions = [v for v in versions if v["training_run_id"] == latest_run_id]
     live_name = next((v["name"] for v in versions if v["is_active"]), None)
 
-    serving = f"Serving model ({live_name})" if live_name else "Serving model"
+    serving = f"Serving model ({model_label(live_name)})" if live_name else "Serving model"
     labels: dict[str, int | None] = {serving: None}
     for version in latest_versions:
-        labels[version["name"]] = version["id"]
+        labels[model_label(version["name"])] = version["id"]
 
     # Streamlit discards a widget's state as soon as a run does not render it, so simply
     # keying the selectbox is not enough: navigating to another page and back would silently
@@ -147,6 +201,20 @@ def model_version_selector(client: DashboardApiClient, key_prefix: str) -> int |
     )
     st.session_state[_MODEL_CHOICE_KEY] = choice
     return labels[choice]
+
+
+def in_sample_notice() -> None:
+    """Warn that the odds on screen replay a season the model already knows the end of.
+
+    Shown wherever ``is_out_of_sample`` is false. Said in a fan's terms -- what the model
+    has seen, and where the honest number lives -- rather than the training vocabulary.
+    """
+    st.warning(
+        "The model learned from this season's final result, so these odds are a replay of "
+        "a result it already knows: they look far sharper than its real forecasting skill. "
+        "The Model leaderboard shows how it does on seasons it had never seen.",
+        icon=":material/history:",
+    )
 
 
 def status_badge(ok: bool, label: str) -> None:

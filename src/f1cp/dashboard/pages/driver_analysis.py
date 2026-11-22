@@ -10,7 +10,13 @@ import streamlit as st
 from f1cp.dashboard.api_client import ApiError
 from f1cp.dashboard.cache import cached_predict_season
 from f1cp.dashboard.components.charts import driver_highlight_trajectory_chart
-from f1cp.dashboard.components.layout import control_panel, season_selector, show_api_error
+from f1cp.dashboard.components.labels import percent
+from f1cp.dashboard.components.layout import (
+    control_panel,
+    in_sample_notice,
+    season_selector,
+    show_api_error,
+)
 from f1cp.dashboard.components.theme import (
     Stat,
     card,
@@ -33,6 +39,8 @@ def _long_frame(rounds: list[dict[str, Any]]) -> pd.DataFrame:
             "driver_id": driver["driver_id"],
             "driver_name": driver["driver_name"],
             "probability": driver["probability"],
+            "rank": driver["rank"],
+            "standing_position": driver.get("standing_position"),
         }
         for round_result in rounds
         for driver in round_result["drivers"]
@@ -48,7 +56,7 @@ def render(client: DashboardApiClient) -> None:
     """
     with st.sidebar:
         control_panel("Season")
-        season = season_selector("driver_analysis")
+        season = season_selector(client, "driver_analysis")
 
     with st.spinner("Loading the season..."):
         try:
@@ -67,11 +75,14 @@ def render(client: DashboardApiClient) -> None:
         return
 
     frame = _long_frame(rounds)
-    # Ordered by the model's final standing rather than alphabetically, so the driver the
-    # page opens on is the one leading the title race -- the answer to "how did this
-    # season go" -- instead of whoever happens to sort first.
+    # Ordered by the championship table at the last scored round rather than alphabetically
+    # or by the model's odds, so the page opens on the championship leader and the list
+    # reads like the standings a fan already knows -- odds would tie a decided season's
+    # whole field at 0% and fall back to an arbitrary order.
     final_round = int(frame["round"].max())
-    ranked = frame[frame["round"] == final_round].sort_values("probability", ascending=False)
+    ranked = frame[frame["round"] == final_round].sort_values(
+        ["standing_position", "rank"], na_position="last"
+    )
     remainder = frame[~frame["driver_id"].isin(ranked["driver_id"])]
     ordered = pd.concat([ranked, remainder.sort_values("driver_name")])
     drivers = ordered[["driver_id", "driver_name"]].drop_duplicates()
@@ -94,13 +105,7 @@ def render(client: DashboardApiClient) -> None:
     )
 
     if not rounds[0]["is_out_of_sample"]:
-        st.warning(
-            "The active model was fitted on data that includes this season, so this "
-            "trajectory shows a result it already knows -- it looks far stronger than the "
-            "model's real skill. See the Model leaderboard page for the honest, "
-            "walk-forward number.",
-            icon=":material/history:",
-        )
+        in_sample_notice()
 
     with st.spinner("Loading standings..."):
         try:
@@ -116,11 +121,13 @@ def render(client: DashboardApiClient) -> None:
     stats = [
         Stat(
             label=f"After round {latest_round}",
-            value=f"{latest:.1%}",
-            detail=f"{change:+.1%} since round {int(history['round'].iloc[0])}",
+            value=percent(latest),
+            # The starting value, not the difference: a gap between two probabilities is
+            # in percentage points, and "+12%" reads as a relative change.
+            detail=f"from {percent(opening)} after round {int(history['round'].iloc[0])}",
             tone="positive" if change > 0 else "negative" if change < 0 else "neutral",
         ),
-        Stat(label="Season peak", value=f"{peak:.1%}", detail="highest of the year"),
+        Stat(label="Season peak", value=percent(peak), detail="highest of the year"),
     ]
     if standing is not None:
         stats.append(

@@ -120,6 +120,10 @@ def test_predict_and_predict_season_endpoints(settings: Settings, tmp_path: Path
         assert body["model_version_id"] == model_version_id
         assert len(body["drivers"]) == 3
         assert sum(d["probability"] for d in body["drivers"]) == pytest.approx(1.0)
+        for driver in body["drivers"]:
+            assert driver["constructor_name"]
+            assert driver["standing_position"] >= 1
+            assert driver["points"] >= 0
 
         season = client.get("/predict-season/2020")
         assert season.status_code == 200
@@ -151,6 +155,10 @@ def test_standings_endpoint(settings: Settings, tmp_path: Path) -> None:
     assert {row["driver_id"] for row in body["standings"]} == {"d1", "d2", "d3"}
     positions = [row["position"] for row in body["standings"]]
     assert positions == sorted(positions)
+    assert {row["constructor_name"] for row in body["standings"]} <= {
+        "Alpha Racing",
+        "Beta Motorsport",
+    }
 
 
 def test_title_contention_endpoint(settings: Settings, tmp_path: Path) -> None:
@@ -163,6 +171,7 @@ def test_title_contention_endpoint(settings: Settings, tmp_path: Path) -> None:
     assert body["season"] == 2020
     assert body["round"] == ROUNDS[-1]
     assert len(body["contenders"]) == 3
+    assert body["rounds_remaining"] == 0
     # At the season's final round, exactly one driver is still mathematically alive.
     still_alive = [c for c in body["contenders"] if c["still_alive"]]
     assert len(still_alive) == 1

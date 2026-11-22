@@ -8,6 +8,7 @@ import streamlit as st
 
 from f1cp.config import load_settings
 from f1cp.dashboard.api_client import ApiError
+from f1cp.dashboard.components.labels import model_label
 from f1cp.dashboard.components.layout import show_api_error
 from f1cp.dashboard.components.theme import Stat, card, page_header, section, stat_grid
 
@@ -42,23 +43,28 @@ def render(client: DashboardApiClient) -> None:
         ],
     )
 
-    stat_grid(
-        [
-            Stat(
-                label="Serving model",
-                value=health.get("active_model") or "None",
-                detail="what predictions are scored with",
-                tone="accent",
-            ),
+    read_only = bool(health.get("read_only"))
+    stats = [
+        Stat(
+            label="Serving model",
+            value=model_label(health.get("active_model")),
+            detail="what predictions are scored with",
+            tone="accent",
+        )
+    ]
+    # Where the API lives only matters to whoever operates it. A read-only deployment is
+    # the public one, whose visitors can do nothing with a URL and a timeout.
+    if not read_only:
+        stats.append(
             Stat(
                 label="API endpoint",
                 value=dashboard_settings.api_base_url.replace("http://", ""),
                 detail=f"{dashboard_settings.request_timeout_seconds:.0f}s request timeout",
-            ),
-        ]
-    )
+            )
+        )
+    stat_grid(stats)
 
-    if health.get("read_only"):
+    if read_only:
         st.info(
             "This deployment is read-only: ingesting data and starting training runs are "
             "disabled so a shared public instance can't be retrained or broken by a visitor.",
