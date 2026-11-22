@@ -10,7 +10,13 @@ import streamlit as st
 from f1cp.dashboard.api_client import ApiError
 from f1cp.dashboard.cache import cached_predict_season
 from f1cp.dashboard.components.charts import multi_driver_trajectory_chart
-from f1cp.dashboard.components.layout import control_panel, season_selector, show_api_error
+from f1cp.dashboard.components.labels import percent
+from f1cp.dashboard.components.layout import (
+    control_panel,
+    in_sample_notice,
+    season_selector,
+    show_api_error,
+)
 from f1cp.dashboard.components.tables import (
     data_table,
     prediction_columns,
@@ -41,11 +47,18 @@ def _long_frame(rounds: list[dict[str, Any]]) -> pd.DataFrame:
             "driver_id": driver["driver_id"],
             "driver_name": driver["driver_name"],
             "probability": driver["probability"],
+            "rank": driver["rank"],
+            "standing_position": driver.get("standing_position"),
         }
         for round_result in rounds
         for driver in round_result["drivers"]
     ]
     return pd.DataFrame(rows)
+
+
+def _by_standing(frame: pd.DataFrame) -> pd.DataFrame:
+    """One round's rows in championship order, drivers without a standing last."""
+    return frame.sort_values(["standing_position", "rank"], na_position="last")
 
 
 def render(client: DashboardApiClient) -> None:
@@ -56,7 +69,7 @@ def render(client: DashboardApiClient) -> None:
     """
     with st.sidebar:
         control_panel("Season")
-        season = season_selector("historical")
+        season = season_selector(client, "historical")
 
     with st.spinner("Loading the season..."):
         try:
@@ -76,8 +89,8 @@ def render(client: DashboardApiClient) -> None:
 
     frame = _long_frame(rounds)
     final_round = int(frame["round"].max())
-    final_ranking = frame[frame["round"] == final_round].sort_values("probability", ascending=False)
-    winner = final_ranking.iloc[0]
+    final_rows = frame[frame["round"] == final_round]
+    winner = final_rows.sort_values("rank").iloc[0]
 
     page_header(
         "Season replay",
@@ -86,16 +99,11 @@ def render(client: DashboardApiClient) -> None:
     )
 
     if not rounds[0]["is_out_of_sample"]:
-        st.warning(
-            "The active model was fitted on data that includes this season, so this replay "
-            "shows a result it already knows -- it looks far stronger than the model's real "
-            "skill. See the Model leaderboard page for the honest, walk-forward number.",
-            icon=":material/history:",
-        )
+        in_sample_notice()
 
     # How early the model settled on its eventual pick: the first round after which it
     # never changed its mind again.
-    leaders = frame.loc[frame.groupby("round")["probability"].idxmax()].sort_values("round")
+    leaders = frame[frame["rank"] == 1].sort_values("round")
     settled_from = final_round
     for _, row in leaders[::-1].iterrows():
         if row["driver_id"] != winner["driver_id"]:
@@ -107,7 +115,7 @@ def render(client: DashboardApiClient) -> None:
             Stat(
                 label=f"Model's pick after round {final_round}",
                 value=str(winner["driver_name"]),
-                detail=f"{winner['probability']:.1%} at the final scored round",
+                detail=f"{percent(winner['probability'])} at the final scored round",
                 tone="accent",
             ),
             Stat(
@@ -125,12 +133,16 @@ def render(client: DashboardApiClient) -> None:
 
     section(
         "How the title race moved",
-        f"Up to {_MAX_SERIES} drivers at a time -- past that, colours stop being reliably "
-        "distinguishable. Choose who to plot in the sidebar.",
+        f"The top six in the championship to start with. Pick up to {_MAX_SERIES} drivers "
+        "in the sidebar -- past that, colours stop being reliably distinguishable.",
     )
 
-    default_ids = final_ranking["driver_id"].head(6).tolist()
-    labels = dict(zip(final_ranking["driver_name"], final_ranking["driver_id"], strict=True))
+    # Offered, and defaulted, in championship order as it stood at the last scored round:
+    # the drivers a reader expects to compare are the ones at the top of the table, and
+    # ordering by the model's odds would list the whole eliminated field alphabetically.
+    standings_order = _by_standing(final_rows)
+    default_ids = standings_order["driver_id"].head(6).tolist()
+    labels = dict(zip(standings_order["driver_name"], standings_order["driver_id"], strict=True))
     default_names = [name for name, driver_id in labels.items() if driver_id in default_ids]
 
     with st.sidebar:

@@ -20,6 +20,13 @@ _SUBTITLE = (
 )
 
 
+def _rounds_left(count: int) -> str:
+    """``"3 rounds to go"``, or that the season is over."""
+    if count == 0:
+        return "Season complete"
+    return f"{count} round{'s' if count != 1 else ''} to go"
+
+
 def render(client: DashboardApiClient) -> None:
     """Render the elimination page.
 
@@ -28,7 +35,7 @@ def render(client: DashboardApiClient) -> None:
     """
     with st.sidebar:
         control_panel("Season")
-        season = season_selector("contention")
+        season = season_selector(client, "contention")
 
     with st.spinner("Working through the remaining calendar..."):
         try:
@@ -46,26 +53,29 @@ def render(client: DashboardApiClient) -> None:
     page_header(
         "Elimination",
         _SUBTITLE,
-        meta=[(f"{result['season']} · after round {result['round']}", "accent")],
+        meta=[
+            (f"{result['season']} · after round {result['round']}", "accent"),
+            (_rounds_left(int(result.get("rounds_remaining", 0))), ""),
+        ],
     )
 
     stat_grid(
         [
             Stat(
-                label="Still in contention",
+                label="Can still win",
                 value=f"{len(alive)} of {len(contenders)}",
-                detail="no rival is yet out of reach",
+                detail="with everything still to race",
                 tone="accent",
             ),
             Stat(
-                label="Need no help",
+                label="Title in own hands",
                 value=str(len(self_sufficient)),
-                detail="winning out would be enough on its own",
+                detail="winning every race left would be enough",
             ),
             Stat(
                 label="Eliminated",
                 value=str(len(contenders) - len(alive)),
-                detail="cannot reach the leader's current points",
+                detail="can no longer catch the leader's points",
                 tone="negative" if len(contenders) > len(alive) else "neutral",
             ),
             Stat(
@@ -78,20 +88,20 @@ def render(client: DashboardApiClient) -> None:
 
     section(
         "Every driver's ceiling",
-        "Ceiling is the points total a driver would hold after winning every race, sprint "
-        "and fastest lap still available. The two status columns answer different "
-        "questions -- hover either header for which.",
+        "Max possible is the points total a driver would hold after winning every race and "
+        "sprint still to come. The two tick columns answer different questions -- hover "
+        "either header for which.",
     )
     data_table(contention_frame(contenders), contention_columns())
 
     with st.expander("How this is decided"):
         st.markdown(
-            "**Still in contention** is elimination in the strict sense: a driver is out "
+            "**Can still win** is elimination in the strict sense: a driver is out "
             "only once some rival *already* holds more points than this driver could "
             "reach by winning every race, sprint and fastest lap left. A rival's points "
             "can only go up, and nothing prevents a rival from scoring nothing for the "
             "rest of the season, so their current total is the only floor that exists.\n\n"
-            "**Self-sufficient** is the stronger question: would winning out be enough "
+            "**In own hands** is the stronger question: would winning out be enough "
             "*even if* the nearest rival took the runner-up spot in every remaining round? "
             "Failing this is not elimination -- it means the title is no longer in the "
             "driver's own hands, and they need a rival to drop points somewhere.\n\n"

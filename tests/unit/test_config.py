@@ -96,5 +96,11 @@ class TestSettings:
         assert settings.data.resolved_max_season == dt.date.today().year
         assert settings.data.min_season in settings.data.season_range
 
+    def test_calibration_defaults_to_platt_without_the_yaml(self) -> None:
+        """Isotonic on a three-season holdout reports 100% title odds (AUDIT_v2 R5)."""
+        from f1cp.config.settings import CalibrationConfig
+
+        assert CalibrationConfig().method == "sigmoid"
+
     def test_missing_files_are_skipped(self, tmp_path: Path) -> None:
         assert load_yaml_files(tmp_path / "does-not-exist.yaml") == {}

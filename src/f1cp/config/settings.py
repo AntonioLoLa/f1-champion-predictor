@@ -369,10 +369,17 @@ class ValidationConfig(_Base):
 
 
 class CalibrationConfig(_Base):
-    """Probability calibration settings."""
+    """Probability calibration settings.
+
+    ``sigmoid`` (Platt) is the default because isotonic is unsafe on this problem: the
+    calibration holdout is a few *seasons*, so only a few independent championship outcomes,
+    and isotonic overfits them into 100% title probabilities. ``conf/models.yaml`` sets
+    ``sigmoid`` explicitly too, but a default that is only safe while the YAML overrides it
+    is a trap for any code path that builds settings without the YAML (docs/AUDIT_v2.md R5).
+    """
 
     enabled: bool = True
-    method: Literal["isotonic", "sigmoid"] = "isotonic"
+    method: Literal["isotonic", "sigmoid"] = "sigmoid"
 
 
 class NormalisationConfig(_Base):

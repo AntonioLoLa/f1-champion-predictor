@@ -9,8 +9,10 @@ import streamlit as st
 from f1cp.dashboard.api_client import ApiError
 from f1cp.dashboard.cache import cached_predict
 from f1cp.dashboard.components.charts import probability_bar_chart
+from f1cp.dashboard.components.labels import model_label, percent
 from f1cp.dashboard.components.layout import (
     control_panel,
+    in_sample_notice,
     model_version_selector,
     season_round_inputs,
     show_api_error,
@@ -39,7 +41,7 @@ def render(client: DashboardApiClient) -> None:
     """
     with st.sidebar:
         control_panel("Prediction")
-        season, round_number = season_round_inputs("predictor")
+        season, round_number = season_round_inputs(client, "predictor")
         model_version_id = model_version_selector(client, "predictor")
 
     with st.spinner("Scoring the field..."):
@@ -57,17 +59,12 @@ def render(client: DashboardApiClient) -> None:
         _SUBTITLE,
         meta=[
             (f"{result['season']} · Round {result['round']}", "accent"),
-            (f"Scored by {result['model_name']}", ""),
+            (f"Scored by {model_label(result['model_name'])}", ""),
         ],
     )
 
     if not result["is_out_of_sample"]:
-        st.warning(
-            "This model was fitted on data that includes this season, so these odds are a "
-            "replay of a result it already knows -- they look far stronger than the model's "
-            "real skill. See the Model leaderboard page for the honest, walk-forward number.",
-            icon=":material/history:",
-        )
+        in_sample_notice()
 
     ranked = sorted(result["drivers"], key=lambda driver: driver["rank"])
     leader = ranked[0]
@@ -79,25 +76,28 @@ def render(client: DashboardApiClient) -> None:
             Stat(
                 label="Favourite",
                 value=leader["driver_name"],
-                detail=f"{leader['probability']:.1%} to take the title",
+                detail=f"{percent(leader['probability'])} to take the title",
                 tone="accent",
             ),
             Stat(
-                label="Lead over second",
-                value=(
-                    f"{leader['probability'] - runner_up['probability']:.1%}" if runner_up else "-"
+                label="Closest challenger",
+                value=runner_up["driver_name"] if runner_up else "-",
+                detail=(
+                    f"{percent(runner_up['probability'])} · "
+                    f"P{runner_up['standing_position']}, {runner_up['points']:.0f} pts"
+                    if runner_up and runner_up["standing_position"]
+                    else None
                 ),
-                detail=f"over {runner_up['driver_name']}" if runner_up else None,
             ),
             Stat(
                 label="Top three combined",
-                value=f"{top_three:.1%}",
-                detail="share of the championship between them",
+                value=percent(top_three),
+                detail="share of the title between them",
             ),
             Stat(
-                label="Drivers scored",
+                label="Drivers rated",
                 value=str(len(ranked)),
-                detail="contesting this round",
+                detail="everyone with a place in the standings",
             ),
         ]
     )
@@ -117,7 +117,16 @@ def render(client: DashboardApiClient) -> None:
 
     section(
         "The full field",
-        "Calibrated is the model's probability before rescaling across the field; raw is "
-        "its output before calibration. Sort by any column.",
+        "Every driver's title chance next to where they stand in the championship. Drivers "
+        "with equal odds are listed in championship order. Sort by any column.",
     )
     data_table(frame, prediction_columns())
+
+    with st.expander("Model details"):
+        st.caption(
+            "How the headline odds are made. The model rates each driver on their own; "
+            "those ratings are adjusted to match how often similar odds came true in past "
+            "seasons, then rescaled so the whole field shares exactly 100%. A driver who "
+            "can no longer win on points is set to 0% before that rescale."
+        )
+        data_table(prediction_rows_frame(result["drivers"], diagnostics=True), prediction_columns())

@@ -10,11 +10,17 @@ from f1cp.api.deps import get_database
 from f1cp.api.schemas.standings import DriverStandingResponse, SeasonStandingsResponse
 
 if TYPE_CHECKING:
+    from f1cp.db.models import DriverStanding
     from f1cp.db.session import Database
 
 __all__ = ["router"]
 
 router = APIRouter(tags=["standings"])
+
+
+def _team(row: DriverStanding, current_team: dict[str, str]) -> str | None:
+    """A standing's team: the driver's latest race, else what the standings report."""
+    return current_team.get(row.driver_id, row.constructor_id)
 
 
 @router.get("/seasons/{season}/standings", response_model=SeasonStandingsResponse)
@@ -50,6 +56,10 @@ def standings(
             msg = f"No standings for season {season} round {resolved_round}"
             raise HTTPException(status_code=404, detail=msg)
 
+        teams = {team.constructor_id: team.name for team in uow.constructors.list()}
+        # The standings' own constructor is the last team a driver was *added* to this
+        # season, not necessarily the one they race for now; the race results are.
+        current_team = uow.results.latest_teams(season, through_round=resolved_round)
         drivers = {
             driver.driver_id: driver
             for driver in uow.drivers.get_by_ids([row.driver_id for row in rows])
@@ -65,7 +75,8 @@ def standings(
                         if row.driver_id in drivers
                         else row.driver_id
                     ),
-                    constructor_id=row.constructor_id,
+                    constructor_id=_team(row, current_team),
+                    constructor_name=teams.get(_team(row, current_team) or ""),
                     points=row.points,
                     position=row.position,
                     wins=row.wins,
