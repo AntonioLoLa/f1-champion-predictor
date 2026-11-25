@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for coding agents (and humans) working in this repository.
 
 ## What this is
 
@@ -30,11 +30,9 @@ Work that changes a requirement goes through `openspec/changes/<id>/` as a propo
 delta spec, and is folded into the main specs once shipped. Slash commands
 (`/opsx:propose`, `/opsx:apply`, `/opsx:archive`) are wired up in `.claude/`.
 
-**Specs describe today, not the target.** Two of them record known defects rather than
-guarantees — group normalisation when the champion is absent from a round, and the
-train/serve population mismatch. Fixing those means strengthening the requirement, and the
-scenario that documents the defect should disappear with it. `docs/AUDIT.md` and `docs/ROADMAP.md`
-hold the findings and the triaged plan.
+**Specs describe today, not the target.** A spec that records a known limitation rather
+than a guarantee is fixed by strengthening the requirement, and the scenario documenting
+the limitation disappears with it.
 
 ## Commands
 
@@ -170,39 +168,19 @@ fails.
   no `drivers` record in that round's results; `_fetch_standings` emits the drivers it
   embeds so the identity resolver can still map them.
 
-## Current state (2026-11-21)
+## Deployment
 
-- **The deployed app updates itself.** `.github/workflows/data-sync.yml` (on `main`, runs
-  Mon/Wed 08:00 UTC) checks out `deploy/streamlit-cloud`, runs `f1cp data update`, and
-  commits `data/f1cp.db` back when the race data changed; Streamlit Community Cloud
-  redeploys on that push. It retrains only when `f1cp train due` says a season has closed
-  since the last successful run (`training/cadence.py`), then also commits `data/mlflow.db`
-  and `mlruns/`. Manual dispatch takes `force_retrain` and `dry_run`. It replaced
-  `nightly-update.yml`, which retrained into an `actions/cache` nothing served and had been
-  disabled for inactivity since 2026-10-03.
-- **Verified end to end on GitHub:** a `dry_run` rehearsal, then a real `force_retrain`
-  run (44892747926) that retrained, committed as `github-actions[bot]` (149e119) and
-  pushed to the deploy branch. The model it published loads and serves locally after
-  `make relocate-mlflow`. The first automatic round sync should be Monday 2026-11-23,
-  after Las Vegas. The first automatic retrain is due after Abu Dhabi (2026-12-06).
-  Whether the keepalive step really resets GitHub's 60-day inactivity timer is unconfirmed
-  until the off-season has passed.
-- **Data:** the deploy branch holds results through **2026 R20, Brazilian GP**. Jolpica has
-  not published 2027 yet; the sync fetches it whole once it does (`_missing_rounds`
-  returns `None` for an unknown season).
-- **Served model:** training run **9** (2026-11-21, on the CI runner), dataset
-  `090a2f23eca2-2026-11-21` (21,282 rows × 72 features). Active model version **49**,
-  `logistic_regression` (`group_log_loss` 0.6225). The one-standard-error tie set is
-  {logistic_regression, lightgbm} (threshold 0.7206). It is the first deployed model with
-  the N1 (`momentum`) and N8 (`position_order` dropped) fixes. Until this run the app
-  served run 8 / model 43 from 2026-08-02. An earlier laptop "run 9" with those fixes was
-  never committed to the deploy branch and is gone, so ids from before today in old notes
-  don't match. `train due` only reacts to a season closing, not to feature-code changes:
-  **after changing features, retrain by hand** (dispatch Data sync with `force_retrain`).
-- `docs/AUDIT_v2.md`: N1, N3–N9 fixed. N5 was fixed via `api.read_only`. The infra finding
-  that "nightly-update.yml updates a deployment nobody serves" is resolved by `data-sync.yml`.
-  N2 (`CircuitBlock` test), R5 (calibration default) and R6 (scikit-learn pin) were fixed
-  on 2026-11-22. Still open: R1–R4, which are documented trade-offs. That includes no
-  hyperparameter search across the model zoo; the README's Limitations section says so.
-  `tests/e2e/test_pipeline.py` covers provider → ingest → dataset → train → serve → next
-  round, over a synthetic eight-season championship (about 25 s; part of `make test`).
+The public app (<https://f1-champion-predictor.streamlit.app/>) runs on Streamlit Community
+Cloud from the `deploy/streamlit-cloud` branch, via `streamlit_app.py`, with the API
+embedded in the same process and in read-only mode. That branch tracks `data/f1cp.db`,
+`data/mlflow.db` and `mlruns/`; Streamlit redeploys on every push to it.
+
+`.github/workflows/data-sync.yml` (on `main`, Mon/Wed 08:00 UTC) checks out the deploy
+branch, runs `f1cp data update`, and commits the database back when race data changed. It
+retrains only when `f1cp train due` says a season has closed since the last successful run
+(`training/cadence.py`). Manual dispatch takes `force_retrain` and `dry_run`. `train due`
+does not react to feature-code changes: **after changing features, retrain by hand**
+(dispatch Data sync with `force_retrain`).
+
+Known trade-offs, documented in the README's Limitations: no hyperparameter search across
+the model zoo, and the calibrator holds out three seasons from each fold.
