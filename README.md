@@ -247,8 +247,23 @@ Python 3.12 · scikit-learn · XGBoost · LightGBM · CatBoost · polars · pand
 · Alembic · PostgreSQL · MLflow · SHAP · FastAPI · Streamlit · Plotly · pytest · Ruff ·
 Black · mypy (strict) · Docker Compose · GitHub Actions
 
-## License
+## Data and licensing
 
-MIT — see [LICENSE](LICENSE). F1 data courtesy of [f1db](https://github.com/f1db/f1db) and
-[Jolpica](https://github.com/jolpica/jolpica-f1). This project is unofficial and not
-associated with Formula 1 or the FIA.
+**Code:** MIT — see [LICENSE](LICENSE). The MIT licence covers the source code in this
+repository, not the Formula 1 data it processes.
+
+**Data:** the app is built on two open datasets, used under their licences:
+
+| Source | Used for | Licence |
+|---|---|---|
+| [F1DB](https://github.com/f1db/f1db) by Marcel Overdijk | Historical bootstrap (1950 onwards) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+| [Jolpica F1](https://github.com/jolpica/jolpica-f1) | Race-by-race updates | [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) ([terms](https://github.com/jolpica/jolpica-f1/blob/main/TERMS.md)) |
+
+The data has been transformed into this project's own schema and extended with derived
+features and model predictions. The database published on the `deploy/streamlit-cloud`
+branch combines both sources and is therefore distributed under **CC BY-NC-SA 4.0**:
+non-commercial use only, with attribution, and adaptations shared under the same licence
+(see `data/LICENSE.md` on that branch). Neither source endorses this project.
+
+This project is unofficial and is not associated in any way with the Formula 1 companies.
+F1, FORMULA ONE, FORMULA 1 and related marks are trade marks of Formula One Licensing B.V.

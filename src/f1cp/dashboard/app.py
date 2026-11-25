@@ -28,6 +28,16 @@ from f1cp.dashboard.pages import (
 )
 from f1cp.dashboard.pages import settings as settings_page
 
+#: Shown on every page: both data licences require attribution where the data is displayed.
+DATA_ATTRIBUTION = (
+    "Data: [F1DB](https://github.com/f1db/f1db) by Marcel Overdijk "
+    "([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)) and "
+    "[Jolpica F1](https://github.com/jolpica/jolpica-f1) "
+    "([CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)), "
+    "transformed and extended with model predictions. "
+    "Unofficial; not associated with Formula 1 or the FIA."
+)
+
 
 @st.cache_resource
 def _client() -> DashboardApiClient:
@@ -123,6 +133,9 @@ def main() -> None:
         }
     )
     navigation.run()
+    # After the page runs, so it sits below that page's own sidebar controls.
+    st.sidebar.divider()
+    st.sidebar.caption(DATA_ATTRIBUTION)
 
 
 main()
