@@ -120,7 +120,6 @@ def _stylesheet() -> str:
       .stApp {{ background: var(--f1-surface); }}
 
       .stMainBlockContainer {{
-        padding-top: 3rem;
         padding-bottom: 6rem;
         max-width: 1320px;
       }}
