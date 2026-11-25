@@ -309,7 +309,11 @@ def driver_highlight_trajectory_chart(
 
     figure.update_layout(
         **_layout(
-            xaxis={**_CATEGORY_AXIS, "title": {"text": "Round", "font": {"size": 11}}, "tickformat": "d"},
+            xaxis={
+                **_CATEGORY_AXIS,
+                "title": {"text": "Round", "font": {"size": 11}},
+                "tickformat": "d",
+            },
             yaxis={**_VALUE_AXIS, "tickformat": ".0%", "rangemode": "tozero"},
             hovermode="x unified",
             height=400,
@@ -365,7 +369,11 @@ def multi_driver_trajectory_chart(
         )
     figure.update_layout(
         **_layout(
-            xaxis={**_CATEGORY_AXIS, "title": {"text": "Round", "font": {"size": 11}}, "tickformat": "d"},
+            xaxis={
+                **_CATEGORY_AXIS,
+                "title": {"text": "Round", "font": {"size": 11}},
+                "tickformat": "d",
+            },
             yaxis={**_VALUE_AXIS, "tickformat": ".0%", "rangemode": "tozero"},
             hovermode="x unified",
             legend=_LEGEND,
