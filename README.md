@@ -5,134 +5,105 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](pyproject.toml)
 
-After every Grand Prix, estimates each driver's probability of winning that season's
-Formula 1 World Drivers' Championship — trained on the full history of the sport
-(1950–present), served over a versioned API, and presented on a live dashboard.
+**After every Grand Prix, the probability that each driver wins that season's Formula 1
+World Championship** — learned from every championship since 1950, validated on seasons
+the model never saw, and updated automatically after each race weekend.
 
-This is a portfolio project built to the standard of a company's production ML platform:
-a real data pipeline against three external providers, PostgreSQL + SQLAlchemy, a leakage-
-audited feature layer, six competing model families tracked in MLflow, calibrated and
-group-normalized probabilities, SHAP explainability, a FastAPI service, a Streamlit
-dashboard, Docker Compose, and CI. No notebooks — every pipeline stage is a tested,
-re-runnable module.
+### ▶ Live app: **[f1-champion-predictor.streamlit.app](https://f1-champion-predictor.streamlit.app/)**
 
-## The problem, honestly stated
+[![Season replay: how the model's view of the 2026 title changed race by race](docs/img/season-replay.png)](https://f1-champion-predictor.streamlit.app/)
 
-Exactly **one driver wins the championship per season**. Restricting to the modern points
-era (1981+) gives roughly 45 independent positive labels, not the 19,000+ driver-round rows
-in the training set — and by round 20 of 24, the title is often already mathematically
-decided. A single global ROC AUC on this problem is close to meaningless: it mostly measures
-how obvious the *late*-season rounds are.
+The app follows the current title fight, replays any past season race by race, shows which
+drivers are mathematically out of contention, and explains what moves each driver's odds.
+It is a full ML system rather than a notebook: a data pipeline against public F1 data
+providers, a leakage-tested feature layer, six competing model families tracked in MLflow,
+calibrated probabilities, a FastAPI service and a Streamlit dashboard, all tested and
+deployed by CI.
 
-So every metric here is reported **stratified by season phase** (early/mid/late), never
-just pooled, and the model is validated by **walking forward through seasons** — trained
-on a growing window of past championships, tested on the next one, never on a random split
-that would leak a season's own ending into its own beginning.
+## The problem
 
-## Real results (active model: `logistic_regression`, selected of 6 candidates by a one-standard-error rule)
+Exactly **one driver wins the championship per season**. Since 1981 that is about 45
+independent positive labels, not the 21,000 driver-round rows in the training set — and by
+round 20 of 24 the title is often already decided. A single pooled ROC AUC on this problem
+mostly measures how obvious the *late* rounds are.
 
-Selected on mean per-group log-loss of the normalized probability distribution across a
-30-fold expanding-origin walk-forward validation (1981–2026); reported on the same
-out-of-fold predictions, never re-fit for reporting. Every ranking metric is shown next to
-its trivial baseline — "the current championship leader wins the title" — because a metric
-with no baseline next to it is not evidence.
+So the project is built around three decisions:
 
-| Season phase | group log-loss ↓ | top-1 hit rate ↑ | baseline (leader wins) |
+- **Walk-forward validation, never a random split.** Each fold trains on all seasons up to
+  year *N* and is tested on season *N+1*, so a season's ending never leaks into its own
+  beginning. Every feature is computed from rounds strictly before the one being predicted,
+  and a test asserts that deleting the future cannot change the past.
+- **Probabilities that form a distribution.** Exactly one driver wins, so each round's
+  probabilities are rescaled to sum to 1, and drivers who are mathematically eliminated are
+  set to 0 by arithmetic, not by the model.
+- **Metrics stratified by season phase, next to a baseline.** Every number below is shown
+  against the trivial rule "the current championship leader wins the title".
+
+## Results
+
+Active model: **logistic regression**, selected from six candidates by mean per-round log
+loss of the normalised distribution, over a 30-fold expanding walk-forward validation
+(1981–2025). All numbers are out-of-fold: the model never saw the season it is scored on.
+
+| Season phase | group log loss ↓ | top-1 hit rate ↑ | baseline (leader wins) |
 |---|---|---|---|
-| Early (< 33% of season) | 0.909 | 72.8% | 62.9% |
-| Mid (33–67%) | 0.560 | 78.0% | 70.2% |
-| Late (> 67%) | 0.399 | 86.0% | 84.7% |
-| **Pooled** | **0.615** | **79.1%** | **73.0%** |
-| Final round of each season | — | 100.0% | 100.0% |
+| Early (< 33% of season) | 0.909 | 74.4% | 62.9% |
+| Mid (33–67%) | 0.573 | 80.2% | 70.2% |
+| Late (> 67%) | 0.408 | 86.0% | 84.7% |
+| **All rounds** | **0.623** | **80.4%** | **73.0%** |
 
-The final-round row is exactly what it looks like: tautological. By a season's last round
-nobody but the points leader has anything left to win, so "the leader wins" also scores
-100% there. Shown anyway, next to its baseline, rather than quietly dropped — a metric that
-ties its own baseline is the strongest possible argument for publishing the baseline.
+The model beats "the leader wins" by the widest margin early in a season, where the question
+is genuinely open. Late in the season it barely beats the baseline, and that is expected:
+the standings already hold the answer. Most of the remaining loss comes from genuinely
+close championships such as 2007, 2010, 2012 and 2025.
 
-Pooled classification/calibration diagnostics: accuracy 98.1%, ROC AUC 0.970, PR AUC 0.797,
-log loss 0.073, Brier score 0.0172 (0.0140 on the served, group-normalised probability),
-expected calibration error 0.0070 (0.0055 normalised).
-
-The phase-stratified trend *is* the headline: the model earns its late-season accuracy by
-using the standings, not by cheating — and it is honestly, measurably worse early in a
-season, exactly where the real prediction problem is hard.
+Pooled diagnostics: ROC AUC 0.968, PR AUC 0.802, Brier score 0.0141 and expected
+calibration error 0.0059 on the served, normalised probability.
 
 <details>
-<summary>All six model-zoo candidates (mean group log-loss, lower is better)</summary>
+<summary>All six candidates, and how the winner was chosen</summary>
 
-| Model | Mean group log-loss |
+| Model | Mean group log loss ↓ |
 |---|---|
-| **Logistic Regression** (active) | **0.615** |
-| LightGBM | 0.707 |
-| Random Forest | 0.730 |
-| XGBoost | 0.938 |
-| CatBoost | 1.071 |
-| MLP | 1.427 |
+| **Logistic regression** (active) | **0.623** |
+| LightGBM | 0.704 |
+| Random forest | 0.731 |
+| XGBoost | 0.936 |
+| CatBoost | 1.080 |
+| MLP | 1.435 |
 
-Logistic Regression's standard error across the 30 folds is 0.092, putting the
-one-standard-error threshold at 0.706 — LightGBM (0.707) and Random Forest (0.730) both
-fall just outside it this time, so the tie set the **one-standard-error rule** resolves
-(`training/selection.py`) is Logistic Regression alone: it wins outright, not just by
-parsimony. That is closer than it sounds — 0.001 separates LightGBM from the threshold —
-and worth re-checking after any retrain rather than assumed to hold. SVM and k-NN are
-excluded by default (`conf/models.yaml`): both were significantly behind and together
-accounted for ~70% of a training run's wall clock.
+Across the 30 folds, logistic regression's standard error is 0.098, so the
+**one-standard-error rule** (`training/selection.py`) treats anything under 0.721 as
+statistically indistinguishable: logistic regression and LightGBM tie, and the rule picks
+the simpler model. With ~45 labels, the data cannot honestly separate them.
 </details>
 
-### Feature ablation: how much of the 72 is doing the work?
+<details>
+<summary>Feature ablation: do all 72 features earn their place?</summary>
 
-Refit the winning model on only its 5 highest permutation-importance features
-(`experience_seasons`, `team_points`, `career_starts`, `rounds_since_win`, `prior_titles`)
-instead of all 72 — same folds, same calibration, same everything else.
-
-| Feature set | Mean group log-loss |
-|---|---|
-| All 72 | **0.615** |
-| Top 5 by permutation importance | 1.232 |
-
-Five features are not close to enough — roughly double the loss of the full panel. Two of
-these five — `experience_seasons`/`career_starts` — are still a correlated pair (r≈0.97);
-that inflates each one's individual permutation-importance ranking while overstating how
-little of the rest of the panel it needs to work alone. This model needs more than a
-handful of features.
-
-Bootstrapped data (verified live): **77 seasons (1950–2026), 1,171 races, 27,438 race
-results, 917 drivers**. The modelling dataset (1981+, unified population — every driver's
-row for every round after their debut, whether or not they started it): **21,072 rows × 72
-features**.
+Refitting the model on only its five most important features (by permutation importance:
+`experience_seasons`, `team_points`, `career_starts`, `rounds_since_win`, `prior_titles`)
+roughly doubles the loss — 1.232 against 0.615 with all 72, measured on the August 2026
+training run over the same feature set. Most of the panel is doing real work.
+</details>
 
 ## Limitations
 
-- **n ≈ 45.** Every number above is a mean over roughly forty-five independent completed
-  championships since 1981, one label each, and a handful of genuinely undecided
-  championships (2010, 2007, 2025, 2012) account for a disproportionate share of total loss
-  — this is a heavy-tailed problem, not a smoothly improvable one. LightGBM and Random
-  Forest are close enough behind Logistic Regression (within ~0.1–0.15 of its standard
-  error) that a different seed, a different fold count, or a hyperparameter search none of
-  these candidates has had could plausibly change the ranking — see the note on
-  hyperparameter tuning below.
-- **In-sample vs. out-of-sample.** The deployed model is refit on nearly every completed
-  season, so scoring a *historical* round replays a result it already knows and looks far
-  better than the numbers above. Every prediction response carries `is_out_of_sample`, and
-  the dashboard warns on it — the numbers reported here are always the honest, held-out,
-  walk-forward ones, never that in-sample replay.
-- **The feature ceiling is low, not absent.** The ablation above shows cutting to 5
-  features roughly doubles the loss, so most of the 72 features earn their place. What it
-  does mean: further feature engineering is unlikely to move `group_log_loss` by more than
-  a few hundredths from here — the remaining error is dominated by genuinely unpredictable
-  seasons, not by missing signal.
-- **The calibrator costs three seasons.** Each fold's last three seasons are held out to
-  fit the probability calibrator rather than the base model, so the deployed model is
-  fit on slightly less than "everything known" (see `Trainer`'s docstring for why
-  cross-fitted calibration was considered and rejected as the fix).
-- **No hyperparameter search.** Every model-zoo candidate's hyperparameters
-  (`conf/models.yaml`) were set by hand, not tuned by a grid or random search over the
-  walk-forward folds. They are reasonable defaults for a dataset this size (shallow trees,
-  explicit L2 regularisation), but the model comparison above is a comparison of these
-  particular configurations, not a fully tuned comparison between algorithm families.
+- **n ≈ 45.** Every number above is an average over about forty-five completed
+  championships, and a handful of close ones account for a large share of the loss. A
+  different seed or fold count could plausibly reorder the top two models.
+- **Historical rounds in the app are in-sample.** The served model is refit on almost
+  every completed season, so replaying a past season shows results it has already seen.
+  Every prediction carries an `is_out_of_sample` flag and the dashboard warns when it is
+  false. The numbers in this README are always the out-of-sample, walk-forward ones.
+- **No hyperparameter search.** The candidates' settings in `conf/models.yaml` were chosen
+  by hand (shallow trees, explicit L2 regularisation). The comparison is between those
+  configurations, not between fully tuned model families.
+- **Calibration costs three seasons.** Each fold holds out its last three training seasons
+  to fit the probability calibrator, so the calibrator never sees data the model was fit
+  on. `Trainer`'s docstring explains why cross-fitted calibration was rejected.
 
-## Architecture
+## How it works
 
 ```mermaid
 flowchart LR
@@ -142,164 +113,142 @@ flowchart LR
         FF1[FastF1 / OpenF1]
     end
 
-    JOL --> ING[update_data.py]
+    JOL --> ING[Ingestion]
     F1DB --> ING
     FF1 -. optional enrichment .-> ING
-    ING --> PG[(PostgreSQL)]
+    ING --> DB[(PostgreSQL / SQLite)]
 
-    PG --> DS[build_dataset.py]
+    DB --> DS[Feature pipeline]
     DS --> PARQUET[[Versioned Parquet dataset]]
-    PARQUET --> TR[train.py]
+    PARQUET --> TR[Walk-forward training]
     TR --> MLF[(MLflow)]
-    TR --> EV[evaluate.py]
-    EV --> REPORT[[HTML report + SHAP]]
 
     MLF --> API[FastAPI]
-    PG --> API
+    DB --> API
     API --> DASH[Streamlit dashboard]
 ```
 
-Dependencies point inward only: `domain` ← `data`/`db` ← `features`/`dataset` ←
-`models`/`training`/`evaluation` ← `inference` ← `api` ← `dashboard`. The dashboard talks
-to the API over HTTP exclusively — it has no database credentials and imports nothing from
-`f1cp.api`.
+- **Data.** Every race since 1950 from the [f1db](https://github.com/f1db/f1db) bulk
+  release, kept current from the [Jolpica](https://github.com/jolpica/jolpica-f1) API
+  (the Ergast successor). Identities are reconciled across providers.
+- **Features.** 72 per driver and round: championship standing and gap to the leader,
+  points still available, recent form, qualifying, team strength, career history,
+  and record at the circuits left on the calendar. Points features have era-normalised
+  twins, because the scoring system has changed many times since 1950.
+- **Models.** Logistic regression, random forest, XGBoost, LightGBM, CatBoost and an MLP,
+  each calibrated (Platt) and explained with SHAP.
+- **Serving.** Inference rebuilds features from the live database, never from the training
+  dataset, so a prediction always reflects the latest ingested race.
+- **Deployment.** A scheduled GitHub Actions workflow ingests new races twice a week and
+  commits the refreshed database to the deploy branch, which redeploys the app. It
+  retrains only when a season closes: until then the season has no champion and cannot be
+  a training label (`training/cadence.py`).
 
-## Quickstart
+The design rationale for each non-obvious decision lives in the docstring of the module
+that made it. `openspec/specs/` describes the behaviour each part guarantees.
 
-### Docker Compose (recommended)
+## Running it locally
+
+### Docker Compose
 
 ```bash
 cp .env.example .env
 make up                    # postgres, mlflow, api, dashboard
-make docker-pipeline       # bootstrap → build dataset → train → evaluate, inside the stack
+make docker-pipeline       # ingest → build dataset → train → evaluate, inside the stack
 ```
 
-- API: <http://localhost:8000/docs>
-- Dashboard: <http://localhost:8501>
-- MLflow: <http://localhost:5000>
+API at <http://localhost:8000/docs>, dashboard at <http://localhost:8501>, MLflow at
+<http://localhost:5000>.
 
-To run one pipeline stage at a time instead:
-
-```bash
-docker compose run --rm pipeline python scripts/update_data.py --bootstrap
-docker compose run --rm pipeline python scripts/build_dataset.py
-docker compose run --rm pipeline python scripts/train.py
-docker compose run --rm pipeline python scripts/evaluate.py
-```
-
-### Local, no Docker (SQLite, zero external services)
+### Without Docker (SQLite, no external services)
 
 ```bash
-make setup                 # uv venv + editable install
-make data                  # bootstrap (f1db) + incremental (Jolpica)
+make setup                 # uv venv + editable install (Python 3.12)
+make data                  # bootstrap from f1db, then incremental from Jolpica
 make dataset
 make train
 make evaluate
-make api                   # terminal 1 — http://localhost:8000
-make dashboard              # terminal 2 — http://localhost:8501
+make api                   # terminal 1: http://localhost:8000
+make dashboard             # terminal 2: http://localhost:8501
 ```
 
-`conf/*.yaml` ships with working defaults for the local path — every value is overridable
-via the environment (see `.env.example`), never edited in place for a personal run.
+Every setting in `conf/*.yaml` can be overridden from the environment; `.env.example`
+lists them.
 
 ## API
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/health` | Liveness/readiness |
-| GET | `/model`, `/model/versions` | Active model / every trained version |
-| POST | `/model/{id}/activate` | Promote a version to active |
-| POST | `/train` | Schedule a training run (background) |
-| GET | `/train/{run_uuid}` | Poll a scheduled run |
-| POST | `/update-data` | Bootstrap / incremental / refresh ingestion |
-| POST | `/predict` | Ranked probabilities for one round (defaults: latest) |
-| GET | `/predict-season/{season}` | Ranked probabilities for every round of a season |
-| GET | `/explain/{season}/{round}` | SHAP feature importances for that round |
+| GET | `/health` | Liveness and readiness |
+| POST | `/predict` | Ranked title probabilities for one round (default: latest) |
+| GET | `/predict-season/{season}` | Probabilities for every round of a season |
+| GET | `/explain/{season}/{round}` | SHAP feature attributions for a round |
 | GET | `/seasons/{season}/standings` | Driver standings after a round |
+| GET | `/seasons/{season}/title-contention` | Who can still mathematically win |
+| GET | `/seasons`, `/seasons/{season}/races` | Ingested seasons and calendars |
+| GET | `/seasons/{season}/races/{round}/results` | Race results |
+| GET | `/seasons/{season}/races/{round}/pit-stops` | Pit stops (2011+) |
+| GET | `/model`, `/model/versions` | Active model and every trained version |
+| POST | `/model/{id}/activate` | Promote a model version |
+| POST | `/train`, GET `/train/{run_uuid}` | Start and poll a training run |
+| POST | `/update-data` | Ingest new data |
 
-Full interactive reference: `/docs` (Swagger) once the API is running.
+The write endpoints are disabled when `API_READ_ONLY=true`, as on the public deployment.
 
 ```bash
-curl -X POST localhost:8000/predict -d '{"season": 2026, "round": 11}'
-# -> Antonelli ranked #1, probabilities summing to 1.0
+curl -X POST localhost:8000/predict -H 'Content-Type: application/json' -d '{}'   # latest round
 ```
-
-## Dashboard
-
-Seven pages, all reading the API over HTTP: **Home**, **Championship Predictor**, **Driver
-Analysis**, **Model Performance**, **Feature Importance**, **Historical Predictions**,
-**Settings** (data acquisition + training control panel).
-
-## Tech stack
-
-Python 3.12 · scikit-learn / XGBoost / LightGBM / CatBoost · polars + pandas · PostgreSQL +
-SQLAlchemy 2.0 + Alembic · MLflow · FastAPI · Streamlit + Plotly · SHAP · pytest · Ruff +
-Black + mypy (strict) · Docker Compose · GitHub Actions.
 
 ## Testing
 
 ```bash
-make test          # unit + integration (excludes tests marked `network`)
-make coverage       # same, with a coverage report
-make lint           # ruff + black --check + mypy --strict
+make test       # unit, integration and e2e (excludes tests that need the network)
+make lint       # ruff + black --check + mypy --strict
 ```
 
-- `unit` — no I/O.
-- `integration` — a real (SQLite) database, a real fitted model, a real MLflow store; no
-  mocks of this project's own code.
-- `e2e` — the full pipeline, start to finish.
-- `network` — needs live provider access; excluded by default, run explicitly.
-
-CI (`.github/workflows/ci.yml`) runs lint and test on every push/PR, then builds the real
-Docker images and brings up the full stack, waiting on each service's own healthcheck
-before asserting success. `data-sync.yml` keeps the public Streamlit Community Cloud
-deployment current: twice a week it checks out `deploy/streamlit-cloud`, ingests any new
-rounds, and commits the refreshed database back to that branch, which redeploys the app.
-It retrains only once a season has closed (`f1cp train due`): a season in progress has no
-champion yet and is excluded from training, so a mid-season retrain would refit identical
-data -- see `f1cp/training/cadence.py`.
+The integration tests use a real SQLite database, a real fitted model and a real MLflow
+store, with no mocks of the project's own code. The end-to-end test runs provider →
+ingestion → dataset → training → serving over a synthetic eight-season championship. CI
+runs lint and tests on every push, then builds the Docker images and brings up the full
+stack.
 
 ## Project layout
 
 ```
 src/f1cp/
 ├── config/       # pydantic settings, loaded from conf/*.yaml + environment
-├── domain/       # scoring rules, enums, season-phase bucketing
-├── data/         # provider ABC + Jolpica/f1db/FastF1/OpenF1/Kaggle, rate-limited HTTP
-├── db/           # SQLAlchemy models, repositories, UnitOfWork, Alembic migrations
-├── features/     # pure, network-free feature blocks + leakage-safe pipeline
-├── dataset/      # DB → engineered, versioned Parquet dataset
-├── models/       # model zoo, calibration, per-group probability normalization
-├── training/     # walk-forward splitters, trainer, MLflow tracking
-├── evaluation/   # metrics × phase, Plotly figures, report generation
-├── explain/      # SHAP + permutation importance
+├── domain/       # scoring rules by era, elimination arithmetic, season phases
+├── data/         # providers (Jolpica, f1db, FastF1, OpenF1, Kaggle), ingestion
+├── db/           # SQLAlchemy models, repositories, Alembic migrations
+├── features/     # feature blocks and the leakage-safe pipeline
+├── dataset/      # database → versioned Parquet dataset
+├── models/       # model zoo, calibration, per-round normalisation
+├── training/     # walk-forward splits, trainer, model selection, MLflow
+├── evaluation/   # phase-stratified metrics and reports
+├── explain/      # SHAP and permutation importance
 ├── inference/    # live prediction service
-├── api/          # FastAPI app, routers, schemas
-├── dashboard/    # Streamlit app, pages, components
-└── cli.py        # typer app; scripts/*.py are thin wrappers over it
+├── api/          # FastAPI app
+├── dashboard/    # Streamlit app
+└── cli.py        # `python -m f1cp.cli`; scripts/*.py are thin wrappers
 ```
 
-## Known operational notes
+<details>
+<summary>Working on the deploy branch</summary>
 
-- **The deploy branch's MLflow store carries absolute paths from whoever trained last.**
-  `deploy/streamlit-cloud` tracks `data/f1cp.db`, `data/mlflow.db` and `mlruns/`, and once
-  `data-sync.yml` retrains after a season closes, the new models in `data/mlflow.db` point
-  at `/home/runner/work/...`. Streamlit Cloud rewrites them at startup and CI does too
-  before training, but a local checkout of that branch does not: serving or evaluating
-  locally fails to load the model until the paths are repointed at your checkout, with
-  `make relocate-mlflow` (idempotent, safe to rerun after every pull). See
-  `f1cp.training.tracking.relocate_artifact_paths`.
+`deploy/streamlit-cloud` tracks `data/f1cp.db`, `data/mlflow.db` and `mlruns/`. MLflow
+stores absolute artifact paths from the machine that trained last, so after pulling that
+branch run `make relocate-mlflow` before serving or evaluating locally (the Streamlit
+entrypoint and CI do this themselves). See `f1cp.training.tracking.relocate_artifact_paths`.
+</details>
 
-- SHAP/PNG export (`kaleido`) needs a working headless Chrome (`plotly_get_chrome`); if it
-  isn't available, PNG export is skipped with a logged warning and the interactive JSON
-  figure is still written — evaluation never fails because of it.
-- The dashboard is verified through Streamlit's own `streamlit.testing.v1.AppTest` (drives
-  every page's real render against a real API, in-process, no browser required) rather than
-  a screenshot-based end-to-end test.
-- Era-normalized points features exist because the scoring system changed repeatedly
-  (10-6-4-3-2-1 → 8-point → 25-point in 2010, a fastest-lap point 2019–24, sprints from
-  2021); every points-derived feature has an era-normalized twin so eras stay comparable.
+## Tech stack
+
+Python 3.12 · scikit-learn · XGBoost · LightGBM · CatBoost · polars · pandas · SQLAlchemy 2
+· Alembic · PostgreSQL · MLflow · SHAP · FastAPI · Streamlit · Plotly · pytest · Ruff ·
+Black · mypy (strict) · Docker Compose · GitHub Actions
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). F1 data courtesy of [f1db](https://github.com/f1db/f1db) and
+[Jolpica](https://github.com/jolpica/jolpica-f1). This project is unofficial and not
+associated with Formula 1 or the FIA.

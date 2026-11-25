@@ -58,10 +58,8 @@ class CircuitBlock(FeatureBlock):
         # Keyed by the season the history was accumulated *through*, not by the round the
         # circuit happened to fall on -- the lookup below asks "what did this driver know
         # about Monza before this season", and Monza's round number is irrelevant to that
-        # question. Getting this wrong is what made the whole block dead weight: joining on
-        # the round as well meant the key only ever matched when a circuit was raced twice
-        # in one season, so 99.7% of rows came back null and the two features it produces
-        # were noise in every model trained on them.
+        # question. Joining on the round as well would only match when a circuit is raced
+        # twice in one season, leaving the block almost entirely null.
         visits = (
             frame.filter(pl.col("finish_position").is_not_null())
             .group_by(["driver_id", "circuit_id", "season"])

@@ -375,7 +375,7 @@ class CalibrationConfig(_Base):
     calibration holdout is a few *seasons*, so only a few independent championship outcomes,
     and isotonic overfits them into 100% title probabilities. ``conf/models.yaml`` sets
     ``sigmoid`` explicitly too, but a default that is only safe while the YAML overrides it
-    is a trap for any code path that builds settings without the YAML (docs/AUDIT_v2.md R5).
+    is a trap for any code path that builds settings without the YAML.
     """
 
     enabled: bool = True

@@ -72,7 +72,8 @@ dev = [
 f1cp = "f1cp.cli:app"
 
 [project.urls]
-Repository = "https://github.com/antoniolozano/f1-champion-predictor"
+Homepage = "https://f1-champion-predictor.streamlit.app/"
+Repository = "https://github.com/AntonioLoLa/f1-champion-predictor"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/f1cp"]
