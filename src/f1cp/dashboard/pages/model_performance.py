@@ -81,11 +81,8 @@ def render(client: DashboardApiClient) -> None:
 
     full_frame = model_versions_frame(versions)
 
-    # Every `f1cp train run` adds a fresh set of candidates (one per zoo algorithm) rather
-    # than overwriting the last one, so the full table grows without bound across repeated
-    # training runs. The main view always shows only the latest run -- no toggle, no
-    # state that can be left on by accident -- full history lives in its own collapsed
-    # expander below instead.
+    # Every training run appends a fresh set of candidates, so the main view shows only the
+    # latest run; the full history lives in the collapsed expander below.
     latest_run_id = int(full_frame["training_run_id"].max())
     frame = full_frame[full_frame["training_run_id"] == latest_run_id]
     if _PRIMARY_METRIC in frame.columns:

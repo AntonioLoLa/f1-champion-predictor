@@ -56,3 +56,14 @@ using the points system in force for that season.
 - **WHEN** the same standings are evaluated with one remaining sprint round instead of one
   conventional round
 - **THEN** every driver's maximum possible total is higher
+
+### Requirement: The rounds still to run are reported
+
+The response SHALL state how many rounds of the season remain after the round it was
+computed for, so a decided championship can be described without consulting the calendar
+separately.
+
+#### Scenario: Remaining rounds are counted after the evaluated round
+
+- **WHEN** contention is computed after round 20 of a 23-round season
+- **THEN** the response reports 3 rounds remaining

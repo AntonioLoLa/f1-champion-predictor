@@ -125,9 +125,8 @@ def normalize_round_probabilities(
         return frame.with_columns(pl.col(probability_column).alias(normalized_column))
 
     if ELIMINATED_COLUMN not in frame.columns:
-        # Silently skipping this used to mean "disable the `season_context` feature block"
-        # was enough to quietly resurrect the exact fabricated-confidence bug this
-        # constraint exists to prevent, with no test or log line to catch it.
+        # Fail loudly: skipping the constraint would let an eliminated driver absorb the
+        # probability mass of a group, which is exactly what it exists to prevent.
         msg = (
             f"{ELIMINATED_COLUMN!r} is missing from the frame being normalised, so the "
             "elimination constraint would silently not apply. Enable the `season_context` "

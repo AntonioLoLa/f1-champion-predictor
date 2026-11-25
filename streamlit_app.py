@@ -36,9 +36,7 @@ import streamlit as st
 _REPO_ROOT = Path(__file__).resolve().parent
 _DATA_DIR = _REPO_ROOT / "data"
 
-# conf/config.yaml's defaults are relative (`sqlite:///data/f1cp.db`, `sqlite:///./data/
-# mlflow.db`), which is exactly what Docker Compose overrides via these same variables --
-# so setting them here follows an existing pattern rather than inventing one.
+# conf/config.yaml's paths are relative to the working directory; pin them to this checkout.
 os.environ.setdefault("F1CP_DATA_DIR", str(_DATA_DIR))
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{_DATA_DIR / 'f1cp.db'}")
 os.environ.setdefault("MLFLOW_TRACKING_URI", f"sqlite:///{_DATA_DIR / 'mlflow.db'}")
