@@ -1,11 +1,9 @@
 """``CircuitBlock`` values, checked against a slow row-at-a-time reference.
 
-The leakage test cannot catch this block's historical defect, and docs/AUDIT_v2.md (N2)
-measured exactly that: with the original join on ``(season, round, driver, circuit)``
-reinstated, ``avg_finish_at_remaining_circuits`` came back 100% null on the synthetic
-fixture and ``test_features_are_unchanged_by_deleting_the_future`` still passed, because a
-column that is null everywhere is trivially unchanged by deleting the future. Only a test
-that pins the values can tell a correct block from a dead one.
+The leakage test cannot catch a broken join in this block: a column that is null
+everywhere is trivially unchanged by deleting the future, so
+``test_features_are_unchanged_by_deleting_the_future`` would still pass. Only a test that
+pins the values can tell a correct block from a dead one.
 
 The reference reads each driver's previous-season finishes at each circuit still on the
 calendar, straight off the panel, with no joins to get wrong.
@@ -98,7 +96,7 @@ def test_matches_the_row_at_a_time_reference(panel: pl.DataFrame) -> None:
 
 
 def test_is_populated_once_drivers_have_history(panel: pl.DataFrame) -> None:
-    """The failure mode N2 measured: a dead block is null everywhere, not just at first."""
+    """A dead block is null everywhere, not just before drivers have history."""
     by_season = panel.group_by("season").agg(
         pl.col("avg_finish_at_remaining_circuits").is_not_null().mean().alias("coverage")
     )

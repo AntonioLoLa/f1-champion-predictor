@@ -97,7 +97,7 @@ class TestSettings:
         assert settings.data.min_season in settings.data.season_range
 
     def test_calibration_defaults_to_platt_without_the_yaml(self) -> None:
-        """Isotonic on a three-season holdout reports 100% title odds (AUDIT_v2 R5)."""
+        """Isotonic on a three-season holdout reports 100% title odds."""
         from f1cp.config.settings import CalibrationConfig
 
         assert CalibrationConfig().method == "sigmoid"

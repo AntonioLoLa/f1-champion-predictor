@@ -2,7 +2,7 @@
 
 Explains :attr:`~f1cp.training.trainer.CandidateResult.base_pipeline` -- the fitted
 pipeline *before* calibration (see that module's docstring for why) -- dispatching to the
-fast, algorithm-native explainer PLAN.md calls for: ``TreeExplainer`` for the gradient-
+fast, algorithm-native explainer: ``TreeExplainer`` for the gradient-
 boosted/ensemble models, ``LinearExplainer`` for logistic regression, and a sampled
 ``KernelExplainer`` for the MLP (the one architecture with no fast native path). Every
 pipeline may have an imputer/scaler ahead of the estimator, so the pipeline is split into

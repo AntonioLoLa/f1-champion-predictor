@@ -3,8 +3,7 @@ name: Data sync
 # Keeps the public Streamlit Community Cloud deployment current. That deployment serves
 # whatever `data/f1cp.db`, `data/mlflow.db` and `mlruns/` are committed on the
 # `deploy/streamlit-cloud` branch, and redeploys on every push to it -- so updating the
-# deployment means committing to that branch, nothing else. (The workflow it replaces
-# retrained into an `actions/cache` entry that nothing ever served; docs/AUDIT_v2.md.)
+# deployment means committing to that branch, nothing else.
 #
 # Two cadences, because new data and new labels arrive at very different rates:
 #

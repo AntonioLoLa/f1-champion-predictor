@@ -52,8 +52,7 @@ def main() -> None:
 
     # Every callback is a lambda, so `st.Page` must be told the URL path explicitly --
     # left to infer it, it uses the callable's `__name__`, and every lambda shares the
-    # name "<lambda>", which collides across pages. Icons are Material Symbols, not emoji,
-    # and every one of them names its page's subject rather than decorating it.
+    # name "<lambda>", which collides across pages.
     navigation = st.navigation(
         {
             "Championship": [
