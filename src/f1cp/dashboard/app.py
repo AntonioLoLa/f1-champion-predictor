@@ -56,7 +56,7 @@ def main() -> None:
         page_title=settings.dashboard.page_title,
         page_icon=":material/trophy:",
         layout="wide",
-        initial_sidebar_state="expanded",
+        initial_sidebar_state="auto",
     )
     client = _client()
 
