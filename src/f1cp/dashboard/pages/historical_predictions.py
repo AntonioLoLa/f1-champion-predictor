@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from f1cp.dashboard.api_client import DashboardApiClient
 
 _MAX_SERIES = 8
-_SUBTITLE = "Replay a completed season and watch the model's view of the title change race by race."
+_SUBTITLE = "Replay any season and watch the model's view of the title change race by race."
 
 
 def _long_frame(rounds: list[dict[str, Any]]) -> pd.DataFrame:
