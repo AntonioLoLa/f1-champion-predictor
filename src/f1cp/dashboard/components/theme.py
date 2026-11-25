@@ -456,7 +456,6 @@ def _stylesheet() -> str:
       /* Responsive */
 
       @media (max-width: 900px) {{
-        .stMainBlockContainer {{ padding-top: 2rem; }}
         .f1-header {{ align-items: flex-start; }}
         .f1-header__title {{ font-size: 1.55rem; }}
         .f1-stats {{ grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }}
