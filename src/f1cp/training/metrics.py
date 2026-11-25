@@ -80,14 +80,12 @@ def group_log_loss(
         The mean loss, or ``None`` if ``frame`` holds no groups at all.
 
     Raises:
-        ValueError: If any group does not contain exactly one positive row. Both directions
-            matter and both were silent before. More than one positive would distort the
-            mean. *Fewer* than one is worse: it means the group being rescaled to sum to
-            one does not contain the answer, so every probability in it is a share of a
-            distribution over the wrong set of drivers -- and simply skipping such a group,
-            which this function used to do, hides exactly the case where the output is
-            meaningless. See :func:`f1cp.dataset.builder._apply_filters` for the defect
-            that made this reachable.
+        ValueError: If any group does not contain exactly one positive row. More than
+            one positive would distort the mean. *Fewer* than one is worse: the group being
+            rescaled to sum to one does not contain the answer, so every probability in it
+            is a share of a distribution over the wrong set of drivers, and skipping such a
+            group would hide exactly the case where the output is meaningless. See
+            :func:`f1cp.dataset.builder._apply_filters` for how such a group can arise.
     """
     if frame.is_empty():
         return None
